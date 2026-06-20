@@ -1,0 +1,521 @@
+<!DOCTYPE html>
+<html lang="nb">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
+<meta name="apple-mobile-web-app-capable" content="yes" />
+<title>Almas labyrintspill</title>
+<style>
+  :root {
+    --bg: #fef9f3; --panel: #ffffff; --ink: #2b2b3a; --accent: #6c5ce7;
+    --good: #2ecc71; --bad: #e74c3c; --grid: #efe7dd;
+  }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body {
+    margin: 0; padding: 0; height: 100%; overflow: hidden;
+    background: var(--bg); color: var(--ink);
+    font-family: "Baloo 2", "Comic Sans MS", system-ui, -apple-system, sans-serif;
+  }
+  /* Stående format tilpasset iPhone og iPad */
+  #app {
+    height: 100dvh; max-width: 820px; margin: 0 auto;
+    display: flex; flex-direction: column;
+    padding: max(8px, env(safe-area-inset-top)) 10px max(10px, env(safe-area-inset-bottom)) 10px;
+  }
+  header {
+    display: flex; align-items: center; justify-content: space-between;
+    gap: 6px; margin-bottom: 6px; flex-wrap: wrap;
+  }
+  h1 { font-size: clamp(16px, 5vw, 22px); margin: 0; color: var(--accent); white-space: nowrap; }
+  .pill {
+    background: var(--panel); border-radius: 14px; padding: 6px 10px;
+    box-shadow: 0 2px 6px rgba(0,0,0,0.08); font-weight: 700; font-size: clamp(13px,3.6vw,16px);
+  }
+  .pill .num { color: var(--accent); }
+  .stats { display: flex; gap: 6px; }
+  .toolbar { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 6px; }
+  button {
+    font-family: inherit; font-weight: 700; font-size: clamp(13px,3.6vw,15px);
+    border: none; border-radius: 13px; padding: 9px 13px; cursor: pointer;
+    background: var(--accent); color: #fff; box-shadow: 0 3px 0 rgba(0,0,0,0.12);
+    transition: transform .05s;
+  }
+  button.secondary { background: #fff; color: var(--ink); }
+  button:active { transform: translateY(2px); box-shadow: none; }
+  .hint { color: #8a8a9a; font-size: clamp(12px,3.3vw,14px); margin: 2px 2px 6px; text-align: center; }
+  #boardWrap {
+    position: relative; flex: 1 1 auto; min-height: 0;
+    background: var(--panel); border-radius: 20px; padding: 10px;
+    box-shadow: 0 6px 18px rgba(0,0,0,0.08);
+    display: flex; justify-content: center; align-items: center;
+  }
+  svg { touch-action: manipulation; max-width: 100%; max-height: 100%; }
+  .cell-grid { stroke: var(--grid); stroke-width: 1; }
+  .piece { cursor: pointer; }
+  .piece .stroke { transition: stroke .1s, fill .1s; }
+  .piece.crash .stroke { stroke: var(--bad) !important; fill: var(--bad) !important; }
+  .piece.crash { animation: shake .32s; }
+  @keyframes shake {
+    0%,100%{ transform: translate(var(--tx), var(--ty)); }
+    25%{ transform: translate(var(--tx), var(--ty)) rotate(-2.5deg); }
+    75%{ transform: translate(var(--tx), var(--ty)) rotate(2.5deg); }
+  }
+  .float {
+    position: absolute; font-weight: 800; font-size: clamp(18px,5vw,24px);
+    pointer-events: none; animation: rise .9s ease-out forwards;
+  }
+  @keyframes rise { from{opacity:1; transform: translateY(0);} to{opacity:0; transform: translateY(-44px);} }
+  .overlay {
+    position: absolute; inset: 0; background: rgba(255,255,255,0.95);
+    border-radius: 20px; display: none; flex-direction: column;
+    align-items: center; justify-content: center; gap: 12px; text-align: center;
+    padding: 16px; overflow: auto;
+  }
+  .overlay.show { display: flex; }
+  .overlay h2 { font-size: clamp(22px,7vw,32px); margin: 0; }
+  .picker { display: grid; grid-template-columns: repeat(auto-fill, minmax(78px, 1fr)); gap: 10px; width: 100%; max-width: 560px; }
+  .icon-btn {
+    background: #fff; border-radius: 14px; padding: 8px; cursor: pointer;
+    box-shadow: 0 2px 6px rgba(0,0,0,0.08); text-align: center; font-weight: 700; font-size: 12px;
+  }
+  .icon-btn svg { display: block; margin: 0 auto 4px; }
+  table.hs { border-collapse: collapse; font-size: clamp(13px,3.6vw,15px); margin: 4px auto; }
+  table.hs th, table.hs td { padding: 5px 12px; text-align: center; }
+  table.hs th { color: var(--accent); border-bottom: 2px solid var(--grid); }
+  table.hs tr.me td { font-weight: 800; color: var(--accent); }
+  #confetti { position: fixed; inset: 0; width: 100%; height: 100%; pointer-events: none; z-index: 50; }
+</style>
+</head>
+<body>
+<canvas id="confetti"></canvas>
+<div id="app">
+  <header>
+    <h1>🧩 Almas labyrint</h1>
+    <div class="stats">
+      <div class="pill">Level <span class="num" id="level">1</span></div>
+      <div class="pill">⏱ <span class="num" id="time">0:00</span></div>
+      <div class="pill">⭐ <span class="num" id="score">100</span></div>
+    </div>
+  </header>
+
+  <div class="toolbar">
+    <button id="btnJourney">🚀 Reise</button>
+    <button id="btnFree" class="secondary">🎨 Velg figur</button>
+    <button id="btnNew" class="secondary">🔀 Nytt brett</button>
+    <button id="btnScores" class="secondary">🏆 Rekorder</button>
+  </div>
+
+  <div class="hint" id="status">Trykk en strek så den kjører UT av brettet. Krasj koster poeng — og tiden tikker også poeng nedover, så vær kjapp!</div>
+
+  <div id="boardWrap">
+    <svg id="board" xmlns="http://www.w3.org/2000/svg"></svg>
+    <div class="overlay" id="overlay">
+      <h2 id="overlayTitle"></h2>
+      <div id="overlayBody"></div>
+      <div id="overlayBtns"></div>
+    </div>
+    <div id="picker" class="overlay"></div>
+  </div>
+</div>
+
+<script src="engine.js"></script>
+<script src="icons.js"></script>
+<script src="generator.js"></script>
+<script>
+(function () {
+  "use strict";
+  var CONFIG = Engine.DEFAULT_CONFIG; // startScore 100, exit +10, crash -10
+  var HS_KEY = "alma_labyrint_highscores";
+
+  var $ = function (id) { return document.getElementById(id); };
+  var svg = $("board"), boardWrap = $("boardWrap");
+  var scoreEl = $("score"), levelEl = $("level"), timeEl = $("time"), statusEl = $("status");
+  var overlay = $("overlay"), overlayTitle = $("overlayTitle"), overlayBody = $("overlayBody"), overlayBtns = $("overlayBtns");
+  var picker = $("picker");
+
+  var state = null, cell = 48, busy = false, boardToken = 0;
+  var mode = "journey", journeyIndex = 0;
+  var journeyIcons = Icons.bySize();
+  var runningScore = CONFIG.startScore, peakScore = CONFIG.startScore, levelsCompleted = 0;
+  var currentIcon = null, currentDiff = 0.5;
+  var accumMs = 0, lastTick = 0, timerActive = false, timerId = null, secApplied = 0;
+
+  // -- High score (localStorage med fallback til minne) ---------------------
+  var memScores = [];
+  function loadScores() {
+    try { return JSON.parse(localStorage.getItem(HS_KEY) || "[]"); }
+    catch (e) { return memScores.slice(); }
+  }
+  function saveScores(list) {
+    try { localStorage.setItem(HS_KEY, JSON.stringify(list)); }
+    catch (e) { memScores = list.slice(); }
+  }
+  function recordScore(entry) {
+    var list = loadScores();
+    list.push(entry);
+    list.sort(function (a, b) { return b.points - a.points || a.timeSec - b.timeSec; });
+    list = list.slice(0, 10);
+    saveScores(list);
+    return list;
+  }
+
+  // -- Tidtaking + poengtap per sekund -------------------------------------
+  // Tiden (og poengtapet) teller bare mens man faktisk spiller — den pauses
+  // mens overgangs-/sluttskjermer vises.
+  function startTimer() {
+    accumMs = 0; secApplied = 0; lastTick = Date.now(); timerActive = true;
+    if (!timerId) timerId = setInterval(tick, 200);
+    timeEl.textContent = fmtTime(0);
+  }
+  function stopTimer() { timerActive = false; }
+  function overlayShown() { return overlay.classList.contains("show") || picker.classList.contains("show"); }
+  function elapsedSec() { return Math.floor(accumMs / 1000); }
+  function fmtTime(s) { var m = Math.floor(s / 60); return m + ":" + ("0" + (s % 60)).slice(-2); }
+  function tick() {
+    var now = Date.now();
+    if (timerActive && !overlayShown()) accumMs += now - lastTick;
+    lastTick = now;
+    var secs = Math.floor(accumMs / 1000);
+    // Trekk poeng for hvert hele sekund som har gått.
+    while (secApplied < secs) {
+      secApplied++;
+      if (state && CONFIG.timePenaltyPerSec) {
+        state.score -= CONFIG.timePenaltyPerSec;
+        if (state.score < 0) state.score = 0;
+      }
+    }
+    if (state) scoreEl.textContent = state.score;
+    timeEl.textContent = fmtTime(secs);
+    if (state && timerActive && !overlayShown() && state.score <= 0) onLose();
+  }
+
+  // -- Brett-oppsett --------------------------------------------------------
+  function difficultyForIndex(i) { return Math.min(0.92, 0.12 + i * 0.13); } // level 1 enkel, deretter hardere
+
+  function startRun(newMode) {
+    mode = newMode;
+    runningScore = CONFIG.startScore; peakScore = CONFIG.startScore; levelsCompleted = 0;
+    startTimer();
+  }
+
+  function loadLevel(icon, difficulty, seed) {
+    currentIcon = icon; currentDiff = difficulty;
+    var level = Generator.generate(icon, {
+      seed: seed == null ? Math.floor(Math.random() * 1e9) : seed,
+      difficulty: difficulty,
+    });
+    state = Engine.createBoard(level, { startScore: runningScore });
+    boardToken++; busy = false; // nytt brett: avbryt eventuelle ventende animasjoner
+    fitCell(level); render();
+    statusEl.textContent = "Figur: " + icon.name + "  ·  " + Object.keys(state.pieces).length + " streker igjen";
+    hideOverlay();
+  }
+
+  function fitCell(level) {
+    var availW = boardWrap.clientWidth - 20;
+    var availH = boardWrap.clientHeight - 20;
+    cell = Math.max(20, Math.min(72, Math.floor(Math.min(availW / level.cols, availH / level.rows))));
+  }
+
+  // -- Tegning --------------------------------------------------------------
+  function render() {
+    var rows = state.rows, cols = state.cols;
+    svg.setAttribute("width", cols * cell);
+    svg.setAttribute("height", rows * cell);
+    svg.setAttribute("viewBox", "0 0 " + cols * cell + " " + rows * cell);
+    while (svg.firstChild) svg.removeChild(svg.firstChild);
+    for (var r = 0; r <= rows; r++) gridLine(0, r * cell, cols * cell, r * cell);
+    for (var c = 0; c <= cols; c++) gridLine(c * cell, 0, c * cell, rows * cell);
+    Object.keys(state.pieces).forEach(function (id) { drawPiece(state.pieces[id]); });
+    scoreEl.textContent = state.score;
+    levelEl.textContent = mode === "journey" ? (journeyIndex + 1) : "★";
+  }
+
+  function gridLine(x1, y1, x2, y2) {
+    var l = document.createElementNS("http://www.w3.org/2000/svg", "line");
+    l.setAttribute("x1", x1); l.setAttribute("y1", y1);
+    l.setAttribute("x2", x2); l.setAttribute("y2", y2);
+    l.setAttribute("class", "cell-grid");
+    svg.appendChild(l);
+  }
+
+  function center(cellObj) { return { x: (cellObj.c + 0.5) * cell, y: (cellObj.r + 0.5) * cell }; }
+
+  function drawPiece(piece) {
+    var g = document.createElementNS("http://www.w3.org/2000/svg", "g");
+    g.setAttribute("class", "piece");
+    g.setAttribute("data-id", piece.id);
+    var thickness = cell * 0.62;
+
+    if (piece.cells.length === 1) {
+      var ct = center(piece.cells[0]);
+      var rect = svgEl("rect", {
+        x: ct.x - thickness / 2, y: ct.y - thickness / 2, width: thickness, height: thickness,
+        rx: thickness * 0.35, fill: piece.color, class: "stroke",
+      });
+      g.appendChild(rect);
+    } else {
+      var pts = piece.cells.map(function (c) { var p = center(c); return p.x + "," + p.y; }).join(" ");
+      var pl = svgEl("polyline", {
+        points: pts, fill: "none", stroke: piece.color, "stroke-width": thickness,
+        "stroke-linecap": "round", "stroke-linejoin": "round", class: "stroke",
+      });
+      g.appendChild(pl);
+    }
+
+    // Pilhode på den cellen som ligger lengst frem i pilretningen.
+    var d = Engine.DELTA[piece.dir];
+    var lead = piece.cells[0], bestProj = -Infinity;
+    piece.cells.forEach(function (c) {
+      var proj = c.r * d.r + c.c * d.c;
+      if (proj > bestProj) { bestProj = proj; lead = c; }
+    });
+    var lc = center(lead), s = cell * 0.24;
+    var ax = lc.x + d.c * cell * 0.30, ay = lc.y + d.r * cell * 0.30;
+    var head = svgEl("polygon", { points: arrowPts(ax, ay, s, piece.dir), fill: "#ffffff", class: "stroke" });
+    g.appendChild(head);
+
+    g.addEventListener("click", function () { onPieceClick(piece.id); });
+    svg.appendChild(g);
+    return g;
+  }
+
+  function arrowPts(x, y, s, dir) {
+    if (dir === "R") return [x, y, x - s * 1.5, y - s, x - s * 1.5, y + s].join(",");
+    if (dir === "L") return [x, y, x + s * 1.5, y - s, x + s * 1.5, y + s].join(",");
+    if (dir === "D") return [x, y, x - s, y - s * 1.5, x + s, y - s * 1.5].join(",");
+    return [x, y, x - s, y + s * 1.5, x + s, y + s * 1.5].join(",");
+  }
+  function svgEl(tag, attrs) {
+    var el = document.createElementNS("http://www.w3.org/2000/svg", tag);
+    Object.keys(attrs).forEach(function (k) { el.setAttribute(k, attrs[k]); });
+    return el;
+  }
+
+  // -- Interaksjon ----------------------------------------------------------
+  function onPieceClick(id) {
+    if (busy || !state.pieces[id]) return;
+    var piece = state.pieces[id];
+    var info = Engine.firstCollision(state, piece);
+    var g = svg.querySelector('[data-id="' + id + '"]');
+    var token = boardToken;
+    busy = true;
+
+    if (info === null) {
+      var vec = exitVector(piece);
+      g.style.transition = "transform .42s ease-in";
+      requestAnimationFrame(function () { g.style.transform = "translate(" + vec.x + "px," + vec.y + "px)"; });
+      var done = false;
+      var finish = function () {
+        if (done || token !== boardToken) return; done = true;
+        var res = Engine.attemptMove(state, id);
+        if (g.parentNode) g.parentNode.removeChild(g);
+        peakScore = Math.max(peakScore, state.score);
+        scoreEl.textContent = state.score;
+        floatText("+" + CONFIG.exitReward, "var(--good)");
+        statusEl.textContent = "Figur: " + currentIcon.name + "  ·  " + Object.keys(state.pieces).length + " streker igjen";
+        busy = false;
+        if (res.solved) onWin();
+      };
+      g.addEventListener("transitionend", finish);
+      setTimeout(finish, 600);
+    } else {
+      var nudge = crashVector(piece, info.freeSteps);
+      g.style.setProperty("--tx", nudge.x + "px");
+      g.style.setProperty("--ty", nudge.y + "px");
+      g.style.transition = "transform .12s ease-out";
+      g.style.transform = "translate(" + nudge.x + "px," + nudge.y + "px)";
+      g.classList.add("crash");
+      var res2 = Engine.attemptMove(state, id);
+      scoreEl.textContent = state.score;
+      floatText("-" + CONFIG.crashPenalty, "var(--bad)");
+      statusEl.textContent = "Au! Den krasjet. Du mistet " + CONFIG.crashPenalty + " poeng.";
+      setTimeout(function () {
+        if (token !== boardToken) return;
+        g.classList.remove("crash");
+        g.style.transition = "transform .18s ease-out";
+        g.style.transform = "translate(0,0)";
+        busy = false;
+        if (res2.gameOver) onLose();
+      }, 360);
+    }
+  }
+
+  function exitVector(piece) {
+    var b = Engine.bbox(piece.cells);
+    if (piece.dir === "R") return { x: (state.cols - b.minC + 1) * cell, y: 0 };
+    if (piece.dir === "L") return { x: -(b.maxC + 2) * cell, y: 0 };
+    if (piece.dir === "D") return { x: 0, y: (state.rows - b.minR + 1) * cell };
+    return { x: 0, y: -(b.maxR + 2) * cell };
+  }
+  function crashVector(piece, freeSteps) {
+    var n = Math.max(freeSteps, 0.25);
+    var d = Engine.DELTA[piece.dir];
+    return { x: d.c * n * cell, y: d.r * n * cell };
+  }
+
+  function floatText(txt, color) {
+    var el = document.createElement("div");
+    el.className = "float"; el.textContent = txt; el.style.color = color;
+    el.style.left = (boardWrap.clientWidth / 2 - 18) + "px";
+    el.style.top = (boardWrap.clientHeight / 2) + "px";
+    boardWrap.appendChild(el);
+    setTimeout(function () { if (el.parentNode) el.parentNode.removeChild(el); }, 900);
+  }
+
+  // -- Konfetti-eksplosjon (bibliotekfri) -----------------------------------
+  var confettiRaf = null;
+  function burstConfetti() {
+    var canvas = $("confetti");
+    if (!canvas.getContext) return;
+    var ctx = canvas.getContext("2d");
+    if (!ctx) return; // ingen canvas-støtte (f.eks. i testmiljø)
+    canvas.width = window.innerWidth; canvas.height = window.innerHeight;
+    var colors = ["#e8485f", "#f2b705", "#6c5ce7", "#2ecc71", "#36b1c9", "#ef6c3a", "#f4cf5a"];
+    var rect = boardWrap.getBoundingClientRect();
+    var cx = rect.left + rect.width / 2, cy = rect.top + rect.height / 2;
+    var P = [];
+    for (var i = 0; i < 160; i++) {
+      var ang = Math.random() * Math.PI * 2, sp = 4 + Math.random() * 10;
+      P.push({
+        x: cx, y: cy, vx: Math.cos(ang) * sp, vy: Math.sin(ang) * sp - 5,
+        g: 0.16 + Math.random() * 0.14, size: 6 + Math.random() * 8,
+        color: colors[i % colors.length], rot: Math.random() * 6.28,
+        vr: (Math.random() - 0.5) * 0.45, life: 0, max: 80 + Math.random() * 50,
+      });
+    }
+    if (confettiRaf) cancelAnimationFrame(confettiRaf);
+    (function frame() {
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      var alive = false;
+      P.forEach(function (p) {
+        if (p.life > p.max) return;
+        alive = true; p.life++;
+        p.vy += p.g; p.x += p.vx; p.y += p.vy; p.rot += p.vr;
+        ctx.save();
+        ctx.globalAlpha = Math.max(0, 1 - p.life / p.max);
+        ctx.translate(p.x, p.y); ctx.rotate(p.rot);
+        ctx.fillStyle = p.color; ctx.fillRect(-p.size / 2, -p.size / 2, p.size, p.size * 0.6);
+        ctx.restore();
+      });
+      if (alive) confettiRaf = requestAnimationFrame(frame);
+      else ctx.clearRect(0, 0, canvas.width, canvas.height);
+    })();
+  }
+
+  // -- Slutt-tilstander -----------------------------------------------------
+  function onWin() {
+    burstConfetti();
+    runningScore = state.score; peakScore = Math.max(peakScore, state.score); levelsCompleted++;
+    if (mode === "journey") {
+      if (journeyIndex + 1 >= journeyIcons.length) {
+        stopTimer();
+        var list = recordScore(makeEntry());
+        showOverlay("🏆 Du klarte alle!", hsTable(list, makeEntry()) +
+          "<div class='hint'>Tid " + fmtTime(elapsedSec()) + " · " + peakScore + " poeng</div>", [
+          btn("Spill igjen", function () { startRun("journey"); journeyIndex = 0; nextJourney(); }),
+        ]);
+        return;
+      }
+      showOverlay("🎉 Level klart!", "<div class='hint'>Du løste " + currentIcon.name + "!</div>",
+        [btn("Neste level →", function () { journeyIndex++; nextJourney(); })]);
+    } else {
+      showOverlay("🎉 Figur ferdig!", "<div class='hint'>Du løste " + currentIcon.name + "!</div>",
+        [btn("Velg ny figur", openPicker), btn("Samme figur igjen", function () { loadLevel(currentIcon, currentDiff); })]);
+    }
+  }
+
+  function onLose() {
+    stopTimer();
+    var entry = makeEntry();
+    var list = recordScore(entry);
+    showOverlay("💔 Du tapte", hsTable(list, entry), [
+      btn("Prøv igjen", function () {
+        if (mode === "journey") { startRun("journey"); journeyIndex = 0; nextJourney(); }
+        else { startRun("free"); loadLevel(currentIcon, currentDiff); }
+      }),
+    ]);
+  }
+
+  function makeEntry() {
+    return { points: peakScore, timeSec: elapsedSec(), levels: levelsCompleted, mode: mode, date: Date.now() };
+  }
+
+  function hsTable(list, me) {
+    var rows = list.map(function (e) {
+      var mine = me && e.date === me.date;
+      return "<tr class='" + (mine ? "me" : "") + "'><td>" + (mine ? "▶" : "") + "</td><td>" + e.points +
+        "</td><td>" + fmtTime(e.timeSec) + "</td><td>" + e.levels + "</td></tr>";
+    }).join("");
+    return "<table class='hs'><tr><th></th><th>Poeng</th><th>Tid</th><th>Levels</th></tr>" + rows + "</table>";
+  }
+
+  function showOverlay(title, bodyHtml, buttons) {
+    picker.classList.remove("show");
+    overlayTitle.textContent = title;
+    overlayBody.innerHTML = bodyHtml || "";
+    overlayBtns.innerHTML = "";
+    (buttons || []).forEach(function (b) { overlayBtns.appendChild(b); });
+    overlay.classList.add("show");
+  }
+  function hideOverlay() { overlay.classList.remove("show"); picker.classList.remove("show"); }
+  function btn(label, fn) {
+    var b = document.createElement("button"); b.textContent = label;
+    b.addEventListener("click", fn); return b;
+  }
+
+  // -- Moduser --------------------------------------------------------------
+  function nextJourney() {
+    mode = "journey";
+    if (journeyIndex >= journeyIcons.length) { journeyIndex = 0; }
+    loadLevel(journeyIcons[journeyIndex], difficultyForIndex(journeyIndex));
+  }
+
+  function openPicker() {
+    hideOverlay();
+    picker.innerHTML = "";
+    var grid = document.createElement("div");
+    grid.className = "picker";
+    Icons.bySize().forEach(function (icon) {
+      var b = document.createElement("div");
+      b.className = "icon-btn";
+      b.innerHTML = miniIcon(icon) + "<div>" + icon.name + "</div>";
+      b.addEventListener("click", function () {
+        startRun("free"); picker.classList.remove("show"); loadLevel(icon, 0.5);
+      });
+      grid.appendChild(b);
+    });
+    picker.appendChild(grid);
+    picker.classList.add("show");
+  }
+
+  function miniIcon(icon) {
+    var ic = Icons.iconToCells(icon);
+    var s = 5, w = ic.cols * s, h = ic.rows * s, rects = "";
+    ic.cells.forEach(function (cl) {
+      rects += '<rect x="' + cl.c * s + '" y="' + cl.r * s + '" width="' + (s - 0.6) + '" height="' + (s - 0.6) + '" rx="1" fill="' + icon.color + '"/>';
+    });
+    return '<svg width="' + w + '" height="' + h + '">' + rects + "</svg>";
+  }
+
+  // -- Knapper --------------------------------------------------------------
+  $("btnJourney").addEventListener("click", function () { startRun("journey"); journeyIndex = 0; nextJourney(); });
+  $("btnFree").addEventListener("click", openPicker);
+  $("btnNew").addEventListener("click", function () { if (currentIcon) loadLevel(currentIcon, currentDiff); });
+  $("btnScores").addEventListener("click", function () {
+    var list = loadScores();
+    showOverlay("🏆 Rekorder", list.length ? hsTable(list, null) : "<div class='hint'>Ingen rekorder ennå. Spill en runde!</div>",
+      [btn("Lukk", hideOverlay)]);
+  });
+  var resizeT;
+  window.addEventListener("resize", function () {
+    clearTimeout(resizeT);
+    resizeT = setTimeout(function () { if (state && currentIcon) { fitCell({ rows: state.rows, cols: state.cols }); render(); } }, 120);
+  });
+
+  // Start
+  startRun("journey"); nextJourney();
+})();
+</script>
+</body>
+</html>
