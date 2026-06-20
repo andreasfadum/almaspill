@@ -141,7 +141,7 @@
     <button id="btnScores" class="secondary">🏆 Rekorder</button>
   </div>
 
-  <div class="hint" id="status">Trykk en strek så den sklir UT av brettet. Jo raskere du fjerner streker, jo større bonus (og kjede!). Krasj koster poeng — og tiden tikker også nedover, så vær kjapp!</div>
+  <div class="hint" id="status">Trykk en strek så den sklir UT av brettet. Jo raskere du fjerner streker, jo større bonus (og kjede!). Krasj koster poeng — og etter 10 sekunder tikker tiden også poeng nedover, så vær kjapp!</div>
 
   <div id="boardWrap">
     <svg id="board" xmlns="http://www.w3.org/2000/svg"></svg>
@@ -175,6 +175,7 @@
   var runningScore = CONFIG.startScore, peakScore = CONFIG.startScore, levelsCompleted = 0;
   var currentIcon = null, currentDiff = 0.5;
   var accumMs = 0, lastTick = 0, timerActive = false, timerId = null, secApplied = 0;
+  var TIME_PENALTY_GRACE_SEC = 10;    // ingen tidsstraff de første 10 sekundene
   var COMBO_WINDOW = 2500;            // ms: fjern raskere enn dette for å bygge kjede
   var lastExitAccum = 0, combo = 0;   // hurtighetsbonus: belønner raske fjerninger
 
@@ -214,10 +215,10 @@
     if (timerActive && !overlayShown()) accumMs += now - lastTick;
     lastTick = now;
     var secs = Math.floor(accumMs / 1000);
-    // Trekk poeng for hvert hele sekund som har gått.
+    // Trekk poeng for hvert hele sekund som har gått — men først ETTER fristen.
     while (secApplied < secs) {
       secApplied++;
-      if (state && CONFIG.timePenaltyPerSec) {
+      if (state && CONFIG.timePenaltyPerSec && secApplied > TIME_PENALTY_GRACE_SEC) {
         state.score -= CONFIG.timePenaltyPerSec;
         if (state.score < 0) state.score = 0;
       }
@@ -347,11 +348,12 @@
       g.style.transition = "transform .12s ease-out";
       g.style.transform = "translate(" + nudge.x + "px," + nudge.y + "px)";
       g.classList.add("crash");
-      combo = 0; // krasj bryter kjeden
+      var endedChain = combo; combo = 0; // krasj bryter kjeden
       var res2 = Engine.attemptMove(state, id);
       scoreEl.textContent = state.score;
       bumpScore();
       popScore("−" + CONFIG.crashPenalty, "var(--bad)", headPos, true);
+      if (endedChain >= COMBO_END_MIN) showCombo("Kjede ×" + endedChain + " ferdig", headPos);
       statusEl.textContent = "Au! Den krasjet. Du mistet " + CONFIG.crashPenalty + " poeng.";
       setTimeout(function () {
         if (token !== boardToken) return;
@@ -410,7 +412,13 @@
       // "Smell": gull og ekstra stort når man var rask, ellers vanlig grønt.
       var color = bonus.total > 0 ? "#f5a623" : "var(--good)";
       popScore("+" + res.reward, color, headPos, false);
-      if (bonus.combo >= 2) showCombo(bonus.combo, headPos);
+      // Kjede-popup vises sjelden: ved hver 10. streak, eller når en lang kjede
+      // tok slutt med denne (for sene) fjerningen.
+      if (bonus.combo > 0 && bonus.combo % COMBO_SHOW_EVERY === 0) {
+        showCombo("🔥 Kjede ×" + bonus.combo + "!", headPos);
+      } else if (bonus.ended >= COMBO_END_MIN) {
+        showCombo("Kjede ×" + bonus.ended + " ferdig", headPos);
+      }
       statusEl.textContent = "Figur: " + currentIcon.name + "  ·  " + Object.keys(state.pieces).length + " streker igjen";
       busy = false;
       if (res.solved) onWin();
@@ -443,14 +451,21 @@
 
   // Hurtighetsbonus: jo raskere etter forrige fjerning, jo større bonus — og
   // raske fjerninger på rad bygger en kjede (combo) som gir ekstra poeng.
+  // Kjeden BEREGNES hver gang, men vises sjelden (se finish/krasj): kun ved hver
+  // 10. streak og når en lang kjede tar slutt — så den ikke forstyrrer flowen.
+  // `ended` = lengden på en kjede som nettopp ble brutt (0 hvis ingen).
   function computeExitBonus() {
     var gap = accumMs - lastExitAccum;
     lastExitAccum = accumMs;
-    if (gap < COMBO_WINDOW) combo++; else combo = 0;
+    var ended = 0;
+    if (gap < COMBO_WINDOW) combo++;        // fortsett kjeden
+    else { ended = combo; combo = 0; }      // for sen: kjeden brytes
     var speed = gap < 1200 ? 10 : gap < 2500 ? 5 : gap < 4000 ? 2 : 0;
     var comboBonus = Math.min(combo, 6) * 2; // opptil +12 for lange kjeder
-    return { speed: speed, comboBonus: comboBonus, total: speed + comboBonus, combo: combo, gap: gap };
+    return { speed: speed, comboBonus: comboBonus, total: speed + comboBonus, combo: combo, ended: ended, gap: gap };
   }
+  var COMBO_SHOW_EVERY = 10;                  // vis kjede-popup ved hver 10. streak
+  var COMBO_END_MIN = 10;                     // vis "ferdig"-popup kun for lange kjeder
 
   // Pikselposisjon (i boardWrap) for midten av en celle på brettet.
   function boardPointToWrap(cellObj) {
@@ -468,12 +483,12 @@
     setTimeout(function () { if (el.parentNode) el.parentNode.removeChild(el); }, crash ? 1000 : 850);
   }
 
-  function showCombo(n, pos) {
+  function showCombo(text, pos) {
     var el = document.createElement("div");
-    el.className = "combo"; el.textContent = "🔥 Kjede ×" + n;
+    el.className = "combo"; el.textContent = text;
     el.style.left = pos.x + "px"; el.style.top = pos.y + "px";
     boardWrap.appendChild(el);
-    setTimeout(function () { if (el.parentNode) el.parentNode.removeChild(el); }, 1100);
+    setTimeout(function () { if (el.parentNode) el.parentNode.removeChild(el); }, 1200);
   }
 
   function bumpScore() {

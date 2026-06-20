@@ -29,7 +29,7 @@
     startScore: 100, // startpoeng
     exitReward: 10, // poeng for vellykket utkjøring
     crashPenalty: 25, // poengtap ved krasj (økt for å gjøre feil dyrere)
-    timePenaltyPerSec: 1, // poengtap for hvert sekund som går (tunbart)
+    timePenaltyPerSec: 2, // poengtap for hvert sekund som går (etter en frist; se UI)
   };
 
   var DELTA = {

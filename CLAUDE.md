@@ -96,13 +96,17 @@ I `engine.js`, `DEFAULT_CONFIG`:
 - `startScore` (100) — startpoeng
 - `exitReward` (10) — poeng per strek ut
 - `crashPenalty` (25) — poengtap ved krasj
-- `timePenaltyPerSec` (1) — poengtap per sekund
+- `timePenaltyPerSec` (2) — poengtap per sekund, men først etter en frist
+  (`TIME_PENALTY_GRACE_SEC` = 10 sek i `index.html`; ingen straff de første 10 s)
 
 Hurtighetsbonus (i `index.html`, `computeExitBonus`): rask fjerning gir ekstra
 poeng på toppen av `exitReward`, og raske fjerninger på rad bygger en **kjede**
 (combo) som gir enda mer. `COMBO_WINDOW` (2500 ms) styrer hvor raskt neste
 fjerning må komme for å holde kjeden i live. Bonusen sendes inn til
-`Engine.attemptMove(state, id, { bonus })`.
+`Engine.attemptMove(state, id, { bonus })`. Kjeden beregnes hver fjerning, men
+popup-en vises sjelden for ikke å forstyrre flowen: kun ved hver
+`COMBO_SHOW_EVERY` (10.) streak, og når en lang kjede (≥ `COMBO_END_MIN`)
+tar slutt.
 
 I `index.html`:
 - `difficultyForIndex(i)` — vanskelighetsrampe for reise-modus (level 1 enkel).
@@ -138,6 +142,9 @@ Reise-modus sorterer automatisk etter størrelse (`bySize`). Kjør `node selftes
   −tall spretter ut av linjen. Ny **hurtighetsbonus** + **kjede (combo)** som
   belønner raske fjerninger (`computeExitBonus`), sendt inn via
   `Engine.attemptMove(state, id, { bonus })`. Tidsstraff per sekund uendret.
+- v6: kjede-popup vises kun ved hver 10. streak + når en lang kjede (≥10) ender
+  (beregnes fortsatt hver fjerning) — mindre forstyrrende. Tidsstraffen starter
+  først etter 10 sekunder (`TIME_PENALTY_GRACE_SEC`) og er doblet til 2/sek.
 
 ## Backlog / ideer til videre arbeid
 - Flere ikoner (mot 100). Behold tydelige silhuetter + farger.
