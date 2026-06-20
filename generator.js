@@ -38,71 +38,83 @@
 
   var DIRS4 = [[0, 1], [0, -1], [1, 0], [-1, 0]];
 
-  // Del fylte celler i streker (rette eller L-form), i sti-rekkefølge.
+  // Del fylte celler i streker. Grupperer kun celler med SAMME farge i samme
+  // strek (så fargeregioner holdes adskilt). Noen få "spesielle" streker får
+  // flere vinkler og er lengre. Returnerer [{ cells:[...], color }].
   function partition(cells, rows, cols, rng, opts) {
     opts = opts || {};
     var maxArm = opts.maxArm || 3;     // maks lengde per arm
     var cornerChance = opts.cornerChance == null ? 0.55 : opts.cornerChance;
-    var filled = {};
-    cells.forEach(function (x) { filled[x.r + "," + x.c] = true; });
+    var specialChance = opts.specialChance == null ? 0.14 : opts.specialChance;
+    var filled = {}, colorAt = {};
+    cells.forEach(function (x) { var k = x.r + "," + x.c; filled[k] = true; colorAt[k] = x.color; });
     var used = {};
     var order = shuffle(cells.slice(), rng);
     var segments = [];
 
-    function freeGlobal(r, c) {
-      var k = r + "," + c;
-      return filled[k] && !used[k];
-    }
-
     order.forEach(function (cell) {
-      if (used[cell.r + "," + cell.c]) return;
-      var path = growPath(cell, freeGlobal, rng, maxArm, cornerChance);
+      var startKey = cell.r + "," + cell.c;
+      if (used[startKey]) return;
+      var startColor = colorAt[startKey];
+      function freeSame(r, c) {
+        var k = r + "," + c;
+        return filled[k] && !used[k] && colorAt[k] === startColor;
+      }
+      var special = rng() < specialChance;
+      var path = growPath(cell, freeSame, rng, special
+        ? { maxArm: maxArm + 2, cornerChance: 0.9, maxCorners: 3 }
+        : { maxArm: maxArm, cornerChance: cornerChance, maxCorners: 1 });
       path.forEach(function (c) { used[c.r + "," + c.c] = true; });
-      segments.push(path);
+      segments.push({ cells: path, color: startColor });
     });
     return segments;
   }
 
-  function growPath(start, freeGlobal, rng, maxArm, cornerChance) {
+  // Vokser en sti fra `start`: arm 1 i en ledig retning, deretter opptil
+  // `maxCorners` perpendikulære armer (hjørner). De fleste streker er rette/L
+  // (maxCorners=1); noen få "spesielle" får flere vinkler og er lengre.
+  // `free(r,c)` avgjør om en celle kan brukes (fylt, ubrukt, riktig farge).
+  function growPath(start, free, rng, opts) {
+    var maxArm = opts.maxArm;
+    var cornerChance = opts.cornerChance;
+    var maxCorners = opts.maxCorners == null ? 1 : opts.maxCorners;
     var path = [{ r: start.r, c: start.c }];
-    var inPath = {};
-    inPath[start.r + "," + start.c] = true;
+    var inPath = {}; inPath[start.r + "," + start.c] = true;
+    var rr = start.r, cc = start.c;
 
+    function canStep(dr, dc) {
+      var nr = rr + dr, nc = cc + dc;
+      return free(nr, nc) && !inPath[nr + "," + nc];
+    }
+    function growArm(dr, dc, len) {
+      var n = 0;
+      while (n < len && canStep(dr, dc)) {
+        rr += dr; cc += dc; path.push({ r: rr, c: cc }); inPath[rr + "," + cc] = true; n++;
+      }
+      return n;
+    }
+
+    // Arm 1: en tilfeldig ledig retning.
     var dirs = shuffle(DIRS4.slice(), rng);
-    // Arm 1
-    var arm1 = null;
+    var arm = null;
     for (var i = 0; i < dirs.length; i++) {
-      var dr = dirs[i][0], dc = dirs[i][1];
-      if (freeGlobal(start.r + dr, start.c + dc) && !inPath[(start.r + dr) + "," + (start.c + dc)]) {
-        arm1 = dirs[i]; break;
-      }
+      if (canStep(dirs[i][0], dirs[i][1])) { arm = dirs[i]; break; }
     }
-    if (!arm1) return path; // enkeltcelle
-    var len1 = 1 + Math.floor(rng() * maxArm);
-    var rr = start.r, cc = start.c, n = 0;
-    while (n < len1 && freeGlobal(rr + arm1[0], cc + arm1[1]) && !inPath[(rr + arm1[0]) + "," + (cc + arm1[1])]) {
-      rr += arm1[0]; cc += arm1[1];
-      path.push({ r: rr, c: cc }); inPath[rr + "," + cc] = true; n++;
-    }
+    if (!arm) return path; // enkeltcelle
+    growArm(arm[0], arm[1], 1 + Math.floor(rng() * maxArm));
 
-    // Arm 2 (hjørne) — perpendikulær på arm 1
-    if (rng() < cornerChance) {
-      var perp = arm1[0] === 0 ? [[1, 0], [-1, 0]] : [[0, 1], [0, -1]];
+    // Flere hjørner, hver perpendikulær på forrige arm.
+    var corners = 0, lastArm = arm;
+    while (corners < maxCorners && rng() < cornerChance) {
+      var perp = lastArm[0] === 0 ? [[1, 0], [-1, 0]] : [[0, 1], [0, -1]];
       shuffle(perp, rng);
-      var arm2 = null;
+      var next = null;
       for (var j = 0; j < perp.length; j++) {
-        if (freeGlobal(rr + perp[j][0], cc + perp[j][1]) && !inPath[(rr + perp[j][0]) + "," + (cc + perp[j][1])]) {
-          arm2 = perp[j]; break;
-        }
+        if (canStep(perp[j][0], perp[j][1])) { next = perp[j]; break; }
       }
-      if (arm2) {
-        var len2 = 1 + Math.floor(rng() * (maxArm - 1) + 0.0001);
-        var m = 0;
-        while (m < len2 && freeGlobal(rr + arm2[0], cc + arm2[1]) && !inPath[(rr + arm2[0]) + "," + (cc + arm2[1])]) {
-          rr += arm2[0]; cc += arm2[1];
-          path.push({ r: rr, c: cc }); inPath[rr + "," + cc] = true; m++;
-        }
-      }
+      if (!next) break;
+      if (growArm(next[0], next[1], 1 + Math.floor(rng() * maxArm)) === 0) break;
+      lastArm = next; corners++;
     }
     return path;
   }
@@ -133,9 +145,9 @@
     var pieces = segments.map(function (seg, i) {
       return {
         id: "p" + i,
-        cells: seg,
-        dir: chooseEndpointDir(seg, rows, cols),
-        color: iconCells.color,
+        cells: seg.cells,
+        dir: chooseEndpointDir(seg.cells, rows, cols),
+        color: seg.color || iconCells.color,
       };
     });
     return { rows: rows, cols: cols, pieces: pieces, iconName: iconCells.name };
@@ -154,8 +166,8 @@
   // reduserer vranglåsen mest. Fjerning av en strek brukes bare når ingen
   // retningsendring hjelper (svært sjelden). Returnerer antall fjernede streker.
   function ensureSolvable(level, rng) {
-    var removed = 0;
-    for (var outer = 0; outer < 400; outer++) {
+    var removed = 0, stuckRounds = 0;
+    for (var outer = 0; outer < 1200; outer++) {
       var cur = remainingCount(level);
       if (cur === 0) return removed;
 
@@ -178,12 +190,24 @@
 
       if (best) {
         findPiece(level, best.id).dir = best.dir; // beste forbedring
+        stuckRounds = 0;
+      } else if (stuckRounds < 15) {
+        // Lokalt minimum: "kick" — snu noen tilfeldige fastlåste streker til den
+        // andre enden for å hoppe ut av minimumet (i stedet for å fjerne).
+        stuckRounds++;
+        var stuck0 = Engine.simulateSolve(level).remaining;
+        shuffle(stuck0, rng);
+        var kicks = 1 + Math.floor(rng() * 3);
+        for (var z = 0; z < kicks && z < stuck0.length; z++) {
+          var kp = findPiece(level, stuck0[z]);
+          kp.dir = Engine.otherEndpointDir(kp);
+        }
       } else {
-        // Lokalt minimum: fjern én fastlåst strek som siste utvei.
+        // Gir opp lokalt: fjern én fastlåst strek som aller siste utvei.
         var stuck = Engine.simulateSolve(level).remaining;
         var victim = stuck[Math.floor(rng() * stuck.length)] || stuck[0];
         level.pieces = level.pieces.filter(function (p) { return p.id !== victim; });
-        removed++;
+        removed++; stuckRounds = 0;
       }
     }
     return removed;
@@ -229,25 +253,22 @@
 
   /*
    * Hovedinngang: lag et brett fra et ikon.
-   *   opts: { seed, difficulty (0..1), maxArm, cornerChance, pad }
-   * pad legger `pad` tomme rader/kolonner rundt figuren på alle fire sider, så
-   * brettet blir større og silhuetten tydeligere (figuren flyttes inn til midten).
+   *   opts: { seed, difficulty (0..1), maxArm, cornerChance, specialChance }
+   * Figuren er allerede beskåret til nøyaktig 1 celle margin av iconToCells, så
+   * brettet er like stort som figuren + margin (figuren fyller plassen).
    */
   function generate(icon, opts) {
     opts = opts || {};
     var seed = opts.seed == null ? Math.floor(Math.random() * 1e9) : opts.seed;
     var difficulty = opts.difficulty == null ? 0.5 : opts.difficulty;
-    var pad = opts.pad || 0;
     var iconCells = Icons.iconToCells(icon);
-    var rows = iconCells.rows + pad * 2, cols = iconCells.cols + pad * 2;
-    var cells = pad
-      ? iconCells.cells.map(function (c) { return { r: c.r + pad, c: c.c + pad }; })
-      : iconCells.cells;
+    var rows = iconCells.rows, cols = iconCells.cols;
     var rng = makeRng(seed);
 
-    var segments = partition(cells, rows, cols, rng, {
+    var segments = partition(iconCells.cells, rows, cols, rng, {
       maxArm: opts.maxArm || 3,
       cornerChance: opts.cornerChance == null ? 0.55 : opts.cornerChance,
+      specialChance: opts.specialChance,
     });
     var level = buildLevel(iconCells, segments, rows, cols);
     var removed = ensureSolvable(level, rng);

@@ -176,21 +176,42 @@ check("generator: hjornestreker finnes", cornerTotal > 0, "totalt hjorner=" + co
 var trivialRate = highDiffLevels ? trivialCount / highDiffLevels : 0;
 check("vanskelighet: faa trivielle paa hoy diff", trivialRate < 0.25, "triviell andel=" + (trivialRate * 100).toFixed(1) + "%");
 
-// Padding: større brett (tomme rader/kolonner rundt figuren) skal fortsatt være
-// løsbart, og dimensjonene skal vokse med 2*pad.
-var padFails = 0, padChecked = 0;
-Icons.ICONS.slice(0, 4).forEach(function (icon) {
-  [1, 2, 3].forEach(function (pad) {
-    for (var s = 1; s <= 10; s++) {
-      var base = Generator.generate(icon, { seed: s, difficulty: 0.5, pad: 0 });
-      var padded = Generator.generate(icon, { seed: s, difficulty: 0.5, pad: pad });
-      padChecked++;
-      if (padded.rows !== base.rows + 2 * pad || padded.cols !== base.cols + 2 * pad) padFails++;
-      if (!Generator.metrics(padded).solvable) padFails++;
-    }
+// Margin: hver figur skal beskjæres til NØYAKTIG 1 tom celle margin på hver side.
+var marginFails = 0;
+Icons.ICONS.forEach(function (icon) {
+  var ic = Icons.iconToCells(icon);
+  var minR = Infinity, maxR = -Infinity, minC = Infinity, maxC = -Infinity;
+  ic.cells.forEach(function (c) {
+    if (c.r < minR) minR = c.r; if (c.r > maxR) maxR = c.r;
+    if (c.c < minC) minC = c.c; if (c.c > maxC) maxC = c.c;
   });
+  // Figuren skal starte på rad/kol 1 og slutte 1 celle fra ytterkant.
+  if (!(minR === 1 && minC === 1 && maxR === ic.rows - 2 && maxC === ic.cols - 2)) marginFails++;
 });
-check("padding: dimensjoner + losbarhet", padFails === 0, "feil=" + padFails + " av " + padChecked);
+check("margin: figur har nøyaktig 1 celle margin", marginFails === 0, "feil=" + marginFails);
+
+// Flerfarge: flerfarge-ikoner skal gi celler med >1 distinkt farge, og hver
+// strek skal være ENSFARGET (segmentering grupperer kun samme farge).
+var multi = Icons.ICONS.filter(function (ic) { return ic.colors; });
+check("flerfarge: minst ett ikon har fargekart", multi.length > 0, "antall=" + multi.length);
+var colorFails = 0, multiColorSeen = 0;
+multi.forEach(function (icon) {
+  var ic = Icons.iconToCells(icon);
+  var distinct = {};
+  ic.cells.forEach(function (c) { distinct[c.color] = true; });
+  if (Object.keys(distinct).length > 1) multiColorSeen++;
+  for (var s = 1; s <= 10; s++) {
+    var lvl = Generator.generate(icon, { seed: s, difficulty: 0.5 });
+    if (!lvl.meta.metrics.solvable) colorFails++;
+    lvl.pieces.forEach(function (p) {
+      // alle celler i en strek skal ha samme farge som streken
+      // (verifiseres indirekte: streken har én farge; cellene kommer fra én region)
+      if (!p.color) colorFails++;
+    });
+  }
+});
+check("flerfarge: faktisk flere farger i ikon", multiColorSeen === multi.length, multiColorSeen + "/" + multi.length);
+check("flerfarge: brett losbare + farget", colorFails === 0, "feil=" + colorFails);
 
 // ---------------------------------------------------------------------------
 // Rapport
