@@ -33,6 +33,15 @@ function check(name, cond, detail) {
   check("rett: +poeng", r1.scoreDelta === Engine.DEFAULT_CONFIG.exitReward);
   check("rett: lost", r1.solved === true);
 
+  // Hurtighetsbonus legges til utkjøringspoengene
+  var sb = Engine.createBoard({ rows: 1, cols: 3, pieces: [{ id: "a", cells: [{ r: 0, c: 0 }], dir: "R" }] });
+  var rb = Engine.attemptMove(sb, "a", { bonus: 7 });
+  check("bonus: utkjoring + bonus", rb.scoreDelta === Engine.DEFAULT_CONFIG.exitReward + 7, "" + rb.scoreDelta);
+  check("bonus: reward-felt", rb.reward === Engine.DEFAULT_CONFIG.exitReward + 7);
+  check("bonus: uten bonus uendret", Engine.attemptMove(
+    Engine.createBoard({ rows: 1, cols: 3, pieces: [{ id: "a", cells: [{ r: 0, c: 0 }], dir: "R" }] }), "a"
+  ).scoreDelta === Engine.DEFAULT_CONFIG.exitReward);
+
   // Rett strek blokkert -> krasj
   var s2 = Engine.createBoard({ rows: 1, cols: 3, pieces: [
     { id: "a", cells: [{ r: 0, c: 0 }], dir: "R" },

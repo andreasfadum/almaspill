@@ -98,6 +98,12 @@ I `engine.js`, `DEFAULT_CONFIG`:
 - `crashPenalty` (25) — poengtap ved krasj
 - `timePenaltyPerSec` (1) — poengtap per sekund
 
+Hurtighetsbonus (i `index.html`, `computeExitBonus`): rask fjerning gir ekstra
+poeng på toppen av `exitReward`, og raske fjerninger på rad bygger en **kjede**
+(combo) som gir enda mer. `COMBO_WINDOW` (2500 ms) styrer hvor raskt neste
+fjerning må komme for å holde kjeden i live. Bonusen sendes inn til
+`Engine.attemptMove(state, id, { bonus })`.
+
 I `index.html`:
 - `difficultyForIndex(i)` — vanskelighetsrampe for reise-modus (level 1 enkel).
 
@@ -127,6 +133,11 @@ Reise-modus sorterer automatisk etter størrelse (`bySize`). Kjør `node selftes
   Nye hjelpere: `Engine.endpointDirs`, `headCell`, `otherEndpointDir`. Generator
   velger pil kun blant gyldige ende-retninger. UI tegner streken på nytt per
   frame langs et «spor» (`animateSnakeExit` i `index.html`).
+- v5: tydeligere poeng-feedback. Utkjøring gir et «smell» (stort sprettende
+  +tall) og en bump på poeng-pillen; krasj rister streken mens et voksende
+  −tall spretter ut av linjen. Ny **hurtighetsbonus** + **kjede (combo)** som
+  belønner raske fjerninger (`computeExitBonus`), sendt inn via
+  `Engine.attemptMove(state, id, { bonus })`. Tidsstraff per sekund uendret.
 
 ## Backlog / ideer til videre arbeid
 - Flere ikoner (mot 100). Behold tydelige silhuetter + farger.

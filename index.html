@@ -84,6 +84,42 @@
   table.hs th { color: var(--accent); border-bottom: 2px solid var(--grid); }
   table.hs tr.me td { font-weight: 800; color: var(--accent); }
   #confetti { position: fixed; inset: 0; width: 100%; height: 100%; pointer-events: none; z-index: 50; }
+
+  /* Sprettende poeng-tall ("smell" ved utkjøring, voksende rist-tall ved krasj) */
+  .pop {
+    position: absolute; font-weight: 900; pointer-events: none; white-space: nowrap;
+    z-index: 20; transform: translate(-50%,-50%);
+    text-shadow: 0 2px 0 rgba(0,0,0,0.14), 0 0 14px rgba(255,255,255,0.7);
+  }
+  .pop-good { font-size: clamp(26px,9vw,52px); animation: popGood .8s cubic-bezier(.18,1.5,.4,1) forwards; }
+  .pop-crash { font-size: clamp(22px,7vw,40px); animation: popCrash .95s ease-out forwards; }
+  @keyframes popGood {
+    0%   { transform: translate(-50%,-50%) scale(0.2); opacity: 0; }
+    22%  { transform: translate(-50%,-58%) scale(1.45); opacity: 1; }
+    38%  { transform: translate(-50%,-62%) scale(1.0); opacity: 1; }
+    100% { transform: translate(-50%,-150%) scale(1.15); opacity: 0; }
+  }
+  @keyframes popCrash {
+    0%   { transform: translate(-50%,-50%) scale(0.4) rotate(0deg); opacity: 0; }
+    12%  { transform: translate(-50%,-52%) scale(1.0) rotate(-9deg); opacity: 1; }
+    28%  { transform: translate(-55%,-60%) scale(1.35) rotate(8deg); opacity: 1; }
+    46%  { transform: translate(-46%,-70%) scale(1.75) rotate(-7deg); opacity: 1; }
+    64%  { transform: translate(-53%,-82%) scale(2.15) rotate(5deg); opacity: 1; }
+    100% { transform: translate(-50%,-160%) scale(2.7) rotate(0deg); opacity: 0; }
+  }
+  .combo {
+    position: absolute; font-weight: 900; pointer-events: none; white-space: nowrap;
+    z-index: 21; color: #ef6c3a; transform: translate(-50%,-50%);
+    font-size: clamp(15px,5vw,24px); text-shadow: 0 2px 0 rgba(0,0,0,0.12);
+    animation: comboPop 1.05s ease-out forwards;
+  }
+  @keyframes comboPop {
+    0%   { transform: translate(-50%,-40%) scale(0.4); opacity: 0; }
+    25%  { transform: translate(-50%,-105%) scale(1.2); opacity: 1; }
+    100% { transform: translate(-50%,-240%) scale(1.0); opacity: 0; }
+  }
+  .pill.bump { animation: pillBump .42s cubic-bezier(.2,1.6,.4,1); }
+  @keyframes pillBump { 0%{transform:scale(1);} 35%{transform:scale(1.4);} 100%{transform:scale(1);} }
 </style>
 </head>
 <body>
@@ -105,7 +141,7 @@
     <button id="btnScores" class="secondary">🏆 Rekorder</button>
   </div>
 
-  <div class="hint" id="status">Trykk en strek så den kjører UT av brettet. Krasj koster poeng — og tiden tikker også poeng nedover, så vær kjapp!</div>
+  <div class="hint" id="status">Trykk en strek så den sklir UT av brettet. Jo raskere du fjerner streker, jo større bonus (og kjede!). Krasj koster poeng — og tiden tikker også nedover, så vær kjapp!</div>
 
   <div id="boardWrap">
     <svg id="board" xmlns="http://www.w3.org/2000/svg"></svg>
@@ -139,6 +175,8 @@
   var runningScore = CONFIG.startScore, peakScore = CONFIG.startScore, levelsCompleted = 0;
   var currentIcon = null, currentDiff = 0.5;
   var accumMs = 0, lastTick = 0, timerActive = false, timerId = null, secApplied = 0;
+  var COMBO_WINDOW = 2500;            // ms: fjern raskere enn dette for å bygge kjede
+  var lastExitAccum = 0, combo = 0;   // hurtighetsbonus: belønner raske fjerninger
 
   // -- High score (localStorage med fallback til minne) ---------------------
   var memScores = [];
@@ -206,6 +244,7 @@
     });
     state = Engine.createBoard(level, { startScore: runningScore });
     boardToken++; busy = false; // nytt brett: avbryt eventuelle ventende animasjoner
+    lastExitAccum = accumMs; combo = 0; // hurtighetsbonus starter på nytt per brett
     fitCell(level); render();
     statusEl.textContent = "Figur: " + icon.name + "  ·  " + Object.keys(state.pieces).length + " streker igjen";
     hideOverlay();
@@ -295,10 +334,12 @@
     var info = Engine.firstCollision(state, piece);
     var g = svg.querySelector('[data-id="' + id + '"]');
     var token = boardToken;
+    var headPos = boardPointToWrap(Engine.headCell(piece));
     busy = true;
 
     if (info === null) {
-      animateSnakeExit(g, piece, id, token);
+      var bonus = computeExitBonus();
+      animateSnakeExit(g, piece, id, token, bonus, headPos);
     } else {
       var nudge = crashVector(piece, info.freeSteps);
       g.style.setProperty("--tx", nudge.x + "px");
@@ -306,9 +347,11 @@
       g.style.transition = "transform .12s ease-out";
       g.style.transform = "translate(" + nudge.x + "px," + nudge.y + "px)";
       g.classList.add("crash");
+      combo = 0; // krasj bryter kjeden
       var res2 = Engine.attemptMove(state, id);
       scoreEl.textContent = state.score;
-      floatText("-" + CONFIG.crashPenalty, "var(--bad)");
+      bumpScore();
+      popScore("−" + CONFIG.crashPenalty, "var(--bad)", headPos, true);
       statusEl.textContent = "Au! Den krasjet. Du mistet " + CONFIG.crashPenalty + " poeng.";
       setTimeout(function () {
         if (token !== boardToken) return;
@@ -326,7 +369,7 @@
   // forlater brettet. Vi tegner streken på nytt hver frame langs et "spor" som er
   // kroppens celler etterfulgt av strålen fra hodet og ut av brettet.
   function cellEq(a, b) { return a.r === b.r && a.c === b.c; }
-  function animateSnakeExit(g, piece, id, token) {
+  function animateSnakeExit(g, piece, id, token, bonus, headPos) {
     var d = Engine.DELTA[piece.dir];
     var head = Engine.headCell(piece);
     var hc = center(head);
@@ -359,11 +402,15 @@
 
     function finish() {
       if (done || token !== boardToken) return; done = true;
-      var res = Engine.attemptMove(state, id);
+      var res = Engine.attemptMove(state, id, { bonus: bonus.total });
       if (g.parentNode) g.parentNode.removeChild(g);
       peakScore = Math.max(peakScore, state.score);
       scoreEl.textContent = state.score;
-      floatText("+" + CONFIG.exitReward, "var(--good)");
+      bumpScore();
+      // "Smell": gull og ekstra stort når man var rask, ellers vanlig grønt.
+      var color = bonus.total > 0 ? "#f5a623" : "var(--good)";
+      popScore("+" + res.reward, color, headPos, false);
+      if (bonus.combo >= 2) showCombo(bonus.combo, headPos);
       statusEl.textContent = "Figur: " + currentIcon.name + "  ·  " + Object.keys(state.pieces).length + " streker igjen";
       busy = false;
       if (res.solved) onWin();
@@ -394,13 +441,45 @@
     return { x: d.c * n * cell, y: d.r * n * cell };
   }
 
-  function floatText(txt, color) {
+  // Hurtighetsbonus: jo raskere etter forrige fjerning, jo større bonus — og
+  // raske fjerninger på rad bygger en kjede (combo) som gir ekstra poeng.
+  function computeExitBonus() {
+    var gap = accumMs - lastExitAccum;
+    lastExitAccum = accumMs;
+    if (gap < COMBO_WINDOW) combo++; else combo = 0;
+    var speed = gap < 1200 ? 10 : gap < 2500 ? 5 : gap < 4000 ? 2 : 0;
+    var comboBonus = Math.min(combo, 6) * 2; // opptil +12 for lange kjeder
+    return { speed: speed, comboBonus: comboBonus, total: speed + comboBonus, combo: combo, gap: gap };
+  }
+
+  // Pikselposisjon (i boardWrap) for midten av en celle på brettet.
+  function boardPointToWrap(cellObj) {
+    var sr = svg.getBoundingClientRect(), wr = boardWrap.getBoundingClientRect();
+    var c = center(cellObj);
+    return { x: (sr.left - wr.left) + c.x, y: (sr.top - wr.top) + c.y };
+  }
+
+  function popScore(txt, color, pos, crash) {
     var el = document.createElement("div");
-    el.className = "float"; el.textContent = txt; el.style.color = color;
-    el.style.left = (boardWrap.clientWidth / 2 - 18) + "px";
-    el.style.top = (boardWrap.clientHeight / 2) + "px";
+    el.className = "pop " + (crash ? "pop-crash" : "pop-good");
+    el.textContent = txt; el.style.color = color;
+    el.style.left = pos.x + "px"; el.style.top = pos.y + "px";
     boardWrap.appendChild(el);
-    setTimeout(function () { if (el.parentNode) el.parentNode.removeChild(el); }, 900);
+    setTimeout(function () { if (el.parentNode) el.parentNode.removeChild(el); }, crash ? 1000 : 850);
+  }
+
+  function showCombo(n, pos) {
+    var el = document.createElement("div");
+    el.className = "combo"; el.textContent = "🔥 Kjede ×" + n;
+    el.style.left = pos.x + "px"; el.style.top = pos.y + "px";
+    boardWrap.appendChild(el);
+    setTimeout(function () { if (el.parentNode) el.parentNode.removeChild(el); }, 1100);
+  }
+
+  function bumpScore() {
+    var pill = scoreEl.parentNode;
+    if (!pill) return;
+    pill.classList.remove("bump"); void pill.offsetWidth; pill.classList.add("bump");
   }
 
   // -- Konfetti-eksplosjon (bibliotekfri) -----------------------------------
