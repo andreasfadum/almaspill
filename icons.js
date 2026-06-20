@@ -261,10 +261,18 @@
 
   function cellCount(icon) { return iconToCells(icon).cells.length; }
 
+  // Kjønnsartikkel (en/et) for figurnavn — brukes i tekst som «neste er et hus».
+  var ARTICLES = {
+    "Stjerne": "en", "Måne": "en", "Sol": "en", "Hjerte": "et", "Eple": "et",
+    "Hus": "et", "Tre": "et", "Båt": "en", "Katt": "en", "Fisk": "en",
+    "Bil": "en", "Rakett": "en",
+  };
+  function article(icon) { return (icon && ARTICLES[icon.name]) || "en"; }
+
   // Ikoner sortert etter størrelse (stigende) = reise-modusens rekkefølge.
   function bySize() {
     return ICONS.slice().sort(function (a, b) { return cellCount(a) - cellCount(b); });
   }
 
-  return { ICONS: ICONS, iconToCells: iconToCells, cellCount: cellCount, bySize: bySize };
+  return { ICONS: ICONS, iconToCells: iconToCells, cellCount: cellCount, bySize: bySize, article: article };
 });

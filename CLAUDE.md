@@ -25,31 +25,44 @@ brettet.
 - **0 poeng = tapt.** Da vises en **high score-tabell** (poeng, tid, levels).
 - Tomt brett = level løst → **konfetti** + «Neste level».
 
-### Moduser
-- **Reise** (hovedmodus): en ENDELØS rekke levels i stigende vanskelighet. Ett
-  ikon per level (små figurer først), ikonene sykler når man har vært gjennom
-  alle. Poeng og tid følger med gjennom hele reisen, og level-nummeret vises
-  etter hver løste level. Fra level 6 får brettet mer luft (padding), og nye
-  vanskeligheter introduseres på egne regel-skjermer (se under).
-- **Velg figur (fri modus)**: spill en valgfri figur fra biblioteket (ingen
-  level-progresjon eller farekant).
+### Modus
+Spillet er **reise-only**: én ENDELØS rekke levels i stigende vanskelighet. Ett
+ikon per level (små figurer først), ikonene sykler når man har vært gjennom alle.
+Poeng og tid følger med gjennom hele reisen. Knappene er forenklet til **Restart**
+(start reisen på nytt fra level 1) og **Rekorder**. Figurene fyller alltid brettet
+(beskåret til 1 celle margin i `iconToCells`), og nye vanskeligheter introduseres
+på egne regel-skjermer (se under).
 
-### Level-mekanikker (kun reise-modus)
-- **Padding fra level 6**: tomme rader/kolonner legges rundt figuren
-  (`padForIndex`) så silhuetten blir tydeligere. `Generator.generate({ pad })`.
+Etter hver løste level vises en **vinner-skjerm**: «Du klarte level X!», poeng
+tjent på brettet vs. teoretisk maks (`maxScoreForPieces`), «Level X var en/et
+[figur], neste er en/et [figur]», og forrige + neste figur som små bilder.
+
+### Rekorder
+`btnScores` / tap-skjerm viser (localStorage `alma_labyrint_records_v2`):
+høyeste level, raskest løst level, flest poeng på ett level, og topp-10 beste
+totalscore. `recordLevelStats` (per løste level), `recordTotalRun` (per tapt
+runde), `recordsHtml` (visning).
+
+### Level-mekanikker
 - **Skalert kollisjonsstraff**: krasj mot annen strek koster mer per level — 2×
   grunnstraff fra level 1, +grunnstraff per level (`crashForLevel`), satt per
   brett via `createBoard({ crashPenalty })`.
-- **Blinkende farekant fra level 10**: én skjermkant blinker og bytter side hvert
-  3. sekund (tilfeldig av de fire). Level 10–19 (rød): kjører en strek UT gjennom
-  den blinkende kanten → **−100**. Level 20+ (grønn): man må treffe KUN den
-  blinkende kanten — andre kanter → **−200**. Regelen vises på egen skjerm før
-  level 10 og 20 (`showRule`). Logikk: `dangerMode`/`dangerEdge`/`edgePenaltyFor`,
-  straffen påføres via `Engine.attemptMove(state, id, { reward: -penalty })`.
+- **Blinkende farekant fra level 10**: én skjermkant blinker og bytter side
+  tilfeldig — rød (level 10–19) hvert **3.** sekund, grønn (level 20+) hvert
+  **5.** sekund (`dangerIntervalMs`). Et **oransje forvarsel** tennes på neste
+  kant 0,5 s før byttet og overlapper den forrige (`scheduleDangerCycle`,
+  `drawDanger`). Level 10–19: kjører en strek UT gjennom den blinkende (røde)
+  kanten → **−200**. Level 20+: man må treffe KUN den blinkende (grønne) kanten —
+  andre kanter → **−200**. Regelen vises på egen skjerm før level 10 og 20
+  (`showRule`). Logikk: `dangerMode`/`dangerEdge`/`edgePenaltyFor`; straffen
+  påføres via `Engine.attemptMove(state, id, { reward: -penalty })`.
 - **Samtidige trykk**: ingen global lås — et trekk avgjøres logisk med én gang,
   slange-animasjonen er rent kosmetisk, og poeng-popups (`pointer-events:none`)
   hindrer aldri at man trykker. Krasj har kun en kort per-strek nedkjøling
   (`crashCooldown`).
+- **Flere farger per figur**: ikon-grid kan bruke flere tegn med fargekart
+  (`colors`); streker grupperes per farge. **Noen få lengre streker** har flere
+  vinkler (`growPath` multi-corner, `specialChance`).
 
 ## Filstruktur (ingen byggesteg, ingen avhengigheter i spillet)
 
@@ -173,6 +186,12 @@ Reise-modus sorterer automatisk etter størrelse (`bySize`). Kjør `node selftes
   (ingen busy-lås), figurnavn med æ/ø/å (Måne/Båt), og «Level N klart!» vises.
   `attemptMove` fikk `opts.reward`-override; konfetti hardnet mot manglende
   canvas. Egen utviklerlogg: se `DEVLOG.md`.
+- v8: figurer fyller brettet (beskåret til 1 celle margin), flere farger per
+  figur (fargekart + samme-farge-segmentering), noen lengre fler-vinkel-streker,
+  oransje farekant-forvarsel (0,5 s før bytte), farekant-straff 200 og grønn kant
+  blinker 5 s / rød 3 s. Ny vinner-skjerm (poeng vs. teoretisk maks + forrige/
+  neste figur), forenklede knapper (kun Restart + Rekorder, fri modus fjernet),
+  og utvidede rekorder (raskest level, flest poeng/level, høyeste level, total).
 
 ## Backlog / ideer til videre arbeid
 - Flere ikoner (mot 100). Behold tydelige silhuetter + farger.

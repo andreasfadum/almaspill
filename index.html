@@ -147,9 +147,7 @@
   </header>
 
   <div class="toolbar">
-    <button id="btnJourney">🚀 Reise</button>
-    <button id="btnFree" class="secondary">🎨 Velg figur</button>
-    <button id="btnNew" class="secondary">🔀 Nytt brett</button>
+    <button id="btnRestart">🔄 Restart</button>
     <button id="btnScores" class="secondary">🏆 Rekorder</button>
   </div>
 
@@ -173,7 +171,7 @@
 (function () {
   "use strict";
   var CONFIG = Engine.DEFAULT_CONFIG; // startScore 100, exit +10, crash -10
-  var HS_KEY = "alma_labyrint_highscores";
+  var RKEY = "alma_labyrint_records_v2";
 
   var $ = function (id) { return document.getElementById(id); };
   var svg = $("board"), boardWrap = $("boardWrap");
@@ -186,11 +184,13 @@
   var journeyIcons = Icons.bySize();
   var runningScore = CONFIG.startScore, peakScore = CONFIG.startScore, levelsCompleted = 0;
   var currentIcon = null, currentDiff = 0.5;
+  var boardStartScore = CONFIG.startScore, boardStartAccumMs = 0, boardMaxScore = 0;
   var crashCooldown = {};              // streker i kort nedkjøling etter krasj (hindrer dobbeltstraff)
 
   // Blinkende farekant (level 10+). dangerMode: 0=ingen, 1=unngå (−100),
   // 2=må treffe (−200 ellers). dangerEdge: hvilken kant blinker nå (U/D/L/R).
-  var DANGER_INTERVAL_MS = 3000;       // hvor lenge en kant blinker før bytte
+  var DANGER_INTERVAL_AVOID = 3000;    // rød (level 10–19): blinker 3 s før bytte
+  var DANGER_INTERVAL_REQUIRE = 5000;  // grønn (level 20+): blinker 5 s før bytte
   var DANGER_PREVIEW_MS = 500;         // oransje forvarsel vises 0,5 s før byttet
   var EDGE_AVOID_PENALTY = 200;        // level 10–19: straff for å treffe blinkende kant
   var EDGE_REQUIRE_PENALTY = 200;      // level 20+: straff for å treffe FEIL kant
@@ -203,23 +203,59 @@
   var COMBO_WINDOW = 2500;            // ms: fjern raskere enn dette for å bygge kjede
   var lastExitAccum = 0, combo = 0;   // hurtighetsbonus: belønner raske fjerninger
 
-  // -- High score (localStorage med fallback til minne) ---------------------
-  var memScores = [];
-  function loadScores() {
-    try { return JSON.parse(localStorage.getItem(HS_KEY) || "[]"); }
-    catch (e) { return memScores.slice(); }
+  // -- Rekorder (localStorage med fallback til minne) -----------------------
+  // Flere kategorier: beste totalscore (topp 10), raskest løst level, flest
+  // poeng på ett level, og høyeste level nådd.
+  var memR = null;
+  function emptyRecords() { return { totals: [], fastestLevel: null, mostLevelPoints: null, highestLevel: 0 }; }
+  function loadRecords() {
+    try { return JSON.parse(localStorage.getItem(RKEY)) || emptyRecords(); }
+    catch (e) { return memR || emptyRecords(); }
   }
-  function saveScores(list) {
-    try { localStorage.setItem(HS_KEY, JSON.stringify(list)); }
-    catch (e) { memScores = list.slice(); }
+  function saveRecords(r) {
+    try { localStorage.setItem(RKEY, JSON.stringify(r)); }
+    catch (e) { memR = r; }
   }
-  function recordScore(entry) {
-    var list = loadScores();
-    list.push(entry);
-    list.sort(function (a, b) { return b.points - a.points || a.timeSec - b.timeSec; });
-    list = list.slice(0, 10);
-    saveScores(list);
-    return list;
+  // Oppdater rekorder når et level er LØST.
+  function recordLevelStats(level, icon, gain, sec) {
+    var R = loadRecords();
+    if (sec > 0 && (!R.fastestLevel || sec < R.fastestLevel.sec)) R.fastestLevel = { sec: sec, level: level, icon: icon };
+    if (!R.mostLevelPoints || gain > R.mostLevelPoints.points) R.mostLevelPoints = { points: gain, level: level, icon: icon };
+    if (level > (R.highestLevel || 0)) R.highestLevel = level;
+    saveRecords(R);
+  }
+  // Lagre en hel runde (totalscore) når man taper.
+  function recordTotalRun(entry) {
+    var R = loadRecords();
+    R.totals = R.totals || [];
+    R.totals.push(entry);
+    R.totals.sort(function (a, b) { return b.points - a.points || a.timeSec - b.timeSec; });
+    R.totals = R.totals.slice(0, 10);
+    saveRecords(R);
+    return R;
+  }
+  // Bygg HTML for rekord-skjermen (me = denne rundens totalscore, kan være null).
+  function recordsHtml(me) {
+    var R = loadRecords();
+    var fl = R.fastestLevel, mp = R.mostLevelPoints;
+    var html = "<table class='hs'>" +
+      "<tr><td>🚀 Høyeste level</td><td>" + (R.highestLevel || 0) + "</td></tr>" +
+      "<tr><td>⚡ Raskest løst level</td><td>" + (fl ? (fl.sec.toFixed(1) + " s · L" + fl.level + " " + fl.icon) : "–") + "</td></tr>" +
+      "<tr><td>⭐ Flest poeng på ett level</td><td>" + (mp ? (mp.points + " · L" + mp.level + " " + mp.icon) : "–") + "</td></tr>" +
+      "</table>";
+    if (R.totals && R.totals.length) {
+      html += "<div class='hint'>Beste totalscore:</div><table class='hs'>" +
+        "<tr><th></th><th>Poeng</th><th>Tid</th><th>Levels</th></tr>";
+      R.totals.forEach(function (e) {
+        var mine = me && e.date === me.date;
+        html += "<tr class='" + (mine ? "me" : "") + "'><td>" + (mine ? "▶" : "") + "</td><td>" + e.points +
+          "</td><td>" + fmtTime(e.timeSec) + "</td><td>" + e.levels + "</td></tr>";
+      });
+      html += "</table>";
+    } else {
+      html += "<div class='hint'>Ingen totalscore ennå.</div>";
+    }
+    return html;
   }
 
   // -- Tidtaking + poengtap per sekund -------------------------------------
@@ -262,6 +298,14 @@
   // +grunnstraff per level deretter (level L -> base*(1+L)).
   function crashForLevel(level) { return CONFIG.crashPenalty * (1 + level); }
 
+  // Teoretisk maks poeng et brett kan gi: alle streker fjernet i én rask kjede
+  // (full hurtighetsbonus + kjede), uten krasj, tidsstraff eller farekant-straff.
+  function maxScoreForPieces(n) {
+    var total = 0;
+    for (var i = 1; i <= n; i++) total += CONFIG.exitReward + 10 + Math.min(i, 6) * 2;
+    return total;
+  }
+
   // Faremodus ut fra level: blinkende kant fra level 10, "kun riktig kant" fra 20.
   function dangerModeForLevel(level) {
     if (mode !== "journey") return 0;
@@ -288,6 +332,9 @@
       startScore: runningScore,
       crashPenalty: crashForLevel(currentLevel()),
     });
+    boardStartScore = state.score;      // for poeng-oppsummering når brettet er løst
+    boardStartAccumMs = accumMs;
+    boardMaxScore = maxScoreForPieces(Object.keys(state.pieces).length);
     boardToken++;                       // nytt brett: avbryt ventende animasjoner (token-sjekk)
     crashCooldown = {};
     lastExitAccum = accumMs; combo = 0; // hurtighetsbonus starter på nytt per brett
@@ -419,17 +466,21 @@
     drawDanger();
     scheduleDangerCycle();
   }
-  // Én syklus: kanten blinker i DANGER_INTERVAL_MS. 0,5 s før byttet tennes et
+  function dangerIntervalMs() {
+    return dangerMode === 2 ? DANGER_INTERVAL_REQUIRE : DANGER_INTERVAL_AVOID;
+  }
+  // Én syklus: kanten blinker (3 s rød / 5 s grønn). 0,5 s før byttet tennes et
   // oransje forvarsel på neste kant; ved byttet blir forvarselet den nye kanten.
   function scheduleDangerCycle() {
+    var iv = dangerIntervalMs();
     var next = randomEdge(dangerEdge);
     dangerPreviewTimer = setTimeout(function () {
       dangerPreviewEdge = next; drawDanger();
-    }, DANGER_INTERVAL_MS - DANGER_PREVIEW_MS);
+    }, iv - DANGER_PREVIEW_MS);
     dangerSwitchTimer = setTimeout(function () {
       dangerEdge = next; dangerPreviewEdge = null; drawDanger();
       scheduleDangerCycle();
-    }, DANGER_INTERVAL_MS);
+    }, iv);
   }
   function stopDanger() {
     if (dangerPreviewTimer) { clearTimeout(dangerPreviewTimer); dangerPreviewTimer = null; }
@@ -682,47 +733,42 @@
   }
 
   // -- Slutt-tilstander -----------------------------------------------------
+  function restartJourney() { startRun("journey"); journeyIndex = 0; nextJourney(); }
+
   function onWin() {
     burstConfetti();
     stopDanger();
     var doneLevel = currentLevel();
+    var gain = state.score - boardStartScore;                 // poeng tjent på dette brettet
+    var sec = (accumMs - boardStartAccumMs) / 1000;           // tid brukt på brettet
+    recordLevelStats(doneLevel, currentIcon.name, gain, sec);
     runningScore = state.score; peakScore = Math.max(peakScore, state.score); levelsCompleted++;
-    if (mode === "journey") {
-      // Reisen er endeløs: ikonene sykler med stadig høyere vanskelighet.
-      showOverlay("🎉 Level " + doneLevel + " klart!",
-        "<div class='hint'>Du løste <b>" + currentIcon.name + "</b> — det var <b>level " + doneLevel +
-        "</b>!<br>Poeng nå: " + state.score + "</div>",
-        [btn("Neste level →", function () { journeyIndex++; nextJourney(); })]);
-    } else {
-      showOverlay("🎉 Figur ferdig!", "<div class='hint'>Du løste " + currentIcon.name + "!</div>",
-        [btn("Velg ny figur", openPicker), btn("Samme figur igjen", function () { loadLevel(currentIcon, currentDiff); })]);
-    }
+    var nextIcon = journeyIcons[(journeyIndex + 1) % journeyIcons.length];
+    var pct = boardMaxScore > 0 ? Math.max(0, Math.round(gain / boardMaxScore * 100)) : 0;
+    var body =
+      "<div class='hint' style='opacity:.7;margin-bottom:0'>Forrige figur:</div>" +
+      "<div>" + miniIcon(currentIcon, 12) + "</div>" +
+      "<div class='hint'>Du fikk <b>" + gain + "</b> av <b>" + boardMaxScore +
+        "</b> mulige poeng på brettet (" + pct + " %).</div>" +
+      "<div class='hint'>Level " + doneLevel + " var " + Icons.article(currentIcon) + " <b>" + currentIcon.name +
+        "</b>. Neste level er " + Icons.article(nextIcon) + " <b>" + nextIcon.name + "</b>.</div>" +
+      "<div class='hint' style='opacity:.7;margin-bottom:0'>Neste figur:</div>" +
+      "<div>" + miniIcon(nextIcon, 12) + "</div>";
+    showOverlay("🎉 Du klarte level " + doneLevel + "!", body,
+      [btn("Neste level →", function () { journeyIndex++; nextJourney(); })]);
   }
 
   function onLose() {
     stopDanger();
     stopTimer();
     var entry = makeEntry();
-    var list = recordScore(entry);
-    showOverlay("💔 Du tapte", "<div class='hint'>Du kom til level " + currentLevel() + ".</div>" + hsTable(list, entry), [
-      btn("Prøv igjen", function () {
-        if (mode === "journey") { startRun("journey"); journeyIndex = 0; nextJourney(); }
-        else { startRun("free"); loadLevel(currentIcon, currentDiff); }
-      }),
-    ]);
+    recordTotalRun(entry);
+    showOverlay("💔 Du tapte", "<div class='hint'>Du kom til level " + currentLevel() + ".</div>" + recordsHtml(entry),
+      [btn("🔄 Restart", restartJourney)]);
   }
 
   function makeEntry() {
-    return { points: peakScore, timeSec: elapsedSec(), levels: levelsCompleted, mode: mode, date: Date.now() };
-  }
-
-  function hsTable(list, me) {
-    var rows = list.map(function (e) {
-      var mine = me && e.date === me.date;
-      return "<tr class='" + (mine ? "me" : "") + "'><td>" + (mine ? "▶" : "") + "</td><td>" + e.points +
-        "</td><td>" + fmtTime(e.timeSec) + "</td><td>" + e.levels + "</td></tr>";
-    }).join("");
-    return "<table class='hs'><tr><th></th><th>Poeng</th><th>Tid</th><th>Levels</th></tr>" + rows + "</table>";
+    return { points: peakScore, timeSec: elapsedSec(), levels: levelsCompleted, date: Date.now() };
   }
 
   function showOverlay(title, bodyHtml, buttons) {
@@ -768,27 +814,11 @@
     }
   }
 
-  function openPicker() {
-    hideOverlay();
-    picker.innerHTML = "";
-    var grid = document.createElement("div");
-    grid.className = "picker";
-    Icons.bySize().forEach(function (icon) {
-      var b = document.createElement("div");
-      b.className = "icon-btn";
-      b.innerHTML = miniIcon(icon) + "<div>" + icon.name + "</div>";
-      b.addEventListener("click", function () {
-        startRun("free"); picker.classList.remove("show"); loadLevel(icon, 0.5);
-      });
-      grid.appendChild(b);
-    });
-    picker.appendChild(grid);
-    picker.classList.add("show");
-  }
-
-  function miniIcon(icon) {
+  // Liten SVG-forhåndsvisning av en figur (per-celle-farge). s = cellestørrelse.
+  function miniIcon(icon, s) {
+    s = s || 5;
     var ic = Icons.iconToCells(icon);
-    var s = 5, w = ic.cols * s, h = ic.rows * s, rects = "";
+    var w = ic.cols * s, h = ic.rows * s, rects = "";
     ic.cells.forEach(function (cl) {
       rects += '<rect x="' + cl.c * s + '" y="' + cl.r * s + '" width="' + (s - 0.6) + '" height="' + (s - 0.6) + '" rx="1" fill="' + (cl.color || icon.color) + '"/>';
     });
@@ -796,13 +826,9 @@
   }
 
   // -- Knapper --------------------------------------------------------------
-  $("btnJourney").addEventListener("click", function () { startRun("journey"); journeyIndex = 0; nextJourney(); });
-  $("btnFree").addEventListener("click", openPicker);
-  $("btnNew").addEventListener("click", function () { if (currentIcon) loadLevel(currentIcon, currentDiff); });
+  $("btnRestart").addEventListener("click", restartJourney);
   $("btnScores").addEventListener("click", function () {
-    var list = loadScores();
-    showOverlay("🏆 Rekorder", list.length ? hsTable(list, null) : "<div class='hint'>Ingen rekorder ennå. Spill en runde!</div>",
-      [btn("Lukk", hideOverlay)]);
+    showOverlay("🏆 Rekorder", recordsHtml(null), [btn("Lukk", hideOverlay)]);
   });
   var resizeT;
   window.addEventListener("resize", function () {

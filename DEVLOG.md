@@ -8,6 +8,44 @@ fra `main`). Se `CLAUDE.md` for arkitektur og invarianter.
 ## Versjoner / tagger
 - `v6-stable` (2026-06-20) — siste versjon FØR level-mekanikkene under. Trygg å
   gå tilbake til: `git checkout v6-stable`.
+- `v7-levels` (2026-06-20) — blinkende farekant, endeløs reise, padding (senere
+  erstattet), samtidige trykk, skalert straff.
+
+---
+
+## 2026-06-20 — Tette figurer, flerfarge, ny vinner-skjerm, rekorder, kun Restart
+
+To batcher samme dag (etter v7):
+
+**Batch A (commit c1d0623):**
+- **1-celle margin:** `iconToCells` beskjærer hver figur til omrisset + nøyaktig
+  1 tom celle på hver side. Erstatter v7-paddingen — figuren fyller plassen, og
+  `fitCell` gir større celler (tydeligere). Selvtest håndhever margin == 1.
+- **Flere farger per figur:** ikon-grid kan bruke ulike tegn (fargekart i
+  `colors`); `iconToCells` gir per-celle-farge. Generatoren grupperer KUN celler
+  med samme farge i samme strek. Tre/Hus/Rakett fikk flerfarge.
+- **Lengre fler-vinkel-streker:** `growPath` støtter flere hjørner; noen få
+  «spesielle» streker er lengre med flere vinkler (`specialChance`).
+  `ensureSolvable` fikk «kick»-perturbasjon → removedMax tilbake til 1.
+- **Farekant:** straff hevet til 200; **oransje forvarsel** på neste kant 0,5 s
+  før byttet (overlapper forrige). `drawDanger`/`scheduleDangerCycle`.
+
+**Batch B (denne commit):**
+- **Grønn kant (level 20+) blinker 5 s**, rød (10–19) 3 s (`dangerIntervalMs`).
+- **Ny vinner-skjerm:** «Du klarte level X!» + poeng tjent på brettet vs.
+  teoretisk maks (`maxScoreForPieces`) i prosent; «Level X var en/et [figur],
+  neste er en/et [figur]»; forrige figur øverst og neste figur nederst (miniIcon).
+  Kjønnsartikkel via `Icons.article`.
+- **Knapper forenklet:** Reise/Velg figur/Nytt brett fjernet → kun **Restart**
+  (+ Rekorder). Spillet er nå reise-only (fri modus fjernet).
+- **Utvidede rekorder:** raskest løst level, flest poeng på ett level, høyeste
+  level, og beste totalscore (topp 10). Ny lagringsnøkkel `alma_labyrint_records_v2`
+  (gamle high scores nullstilles). `recordLevelStats`/`recordTotalRun`/`recordsHtml`.
+
+**Verifisert:** `node selftest.js` grønn (43 sjekker); jsdom-røyktest driver
+reisen til level 20 og bekrefter ny vinner-skjerm (2 figurer + maks-poeng),
+regel-skjermer, farekant, kun-Restart-knapp, og at rekord-skjermen bygges — ingen
+kjøretidsfeil.
 
 ---
 
