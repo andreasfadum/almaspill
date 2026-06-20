@@ -69,6 +69,35 @@ function check(name, cond, detail) {
   check("L: krasj mot brikke", r5.result === "crash", r5.result);
   check("L: freeSteps=0", r5.freeSteps === 0, "" + r5.freeSteps);
 
+  // Pil kun i ENDE: gyldige retninger og hodecelle
+  var Lp = { cells: [{ r: 0, c: 0 }, { r: 0, c: 1 }, { r: 1, c: 1 }], dir: "D" };
+  var eds = Engine.endpointDirs(Lp);
+  check("ende: to gyldige retninger", eds.length === 2 && eds.indexOf("L") >= 0 && eds.indexOf("D") >= 0, eds.join(""));
+  var hc = Engine.headCell(Lp);
+  check("ende: hode ved D = hjornecelle", hc.r === 1 && hc.c === 1, hc.r + "," + hc.c);
+  check("ende: hode ved L = motsatt ende", (function () { var h = Engine.headCell({ cells: Lp.cells, dir: "L" }); return h.r === 0 && h.c === 0; })());
+  check("ende: andre ende-retning", Engine.otherEndpointDir(Lp) === "L", Engine.otherEndpointDir(Lp));
+
+  // SLANGE: L retter seg ut langs aksen — en celle ved SIDEN av kroppen (utenfor
+  // hodets stråle) skal IKKE blokkere. (Med gammel stiv gliding ville den krasje.)
+  var s4b = Engine.createBoard({ rows: 3, cols: 2, pieces: [
+    { id: "L", cells: [{ r: 0, c: 0 }, { r: 0, c: 1 }, { r: 1, c: 1 }], dir: "D" },
+    { id: "side", cells: [{ r: 2, c: 0 }], dir: "U" },
+  ] });
+  check("slange: L retter seg ut forbi celle ved siden", Engine.pathClear(s4b, s4b.pieces["L"]));
+  check("slange: side-celle blokkeres av L (opp gjennom hjornet)", !Engine.pathClear(s4b, s4b.pieces["side"]));
+  var r4b = Engine.attemptMove(s4b, "L");
+  check("slange: L kjorer ut", r4b.result === "exit", r4b.result);
+
+  // SLANGE-krasj: noe PÅ hodets stråle stopper streken.
+  var s4c = Engine.createBoard({ rows: 4, cols: 2, pieces: [
+    { id: "L", cells: [{ r: 0, c: 0 }, { r: 0, c: 1 }, { r: 1, c: 1 }], dir: "D" },
+    { id: "blk", cells: [{ r: 3, c: 1 }], dir: "U" },
+  ] });
+  var r4c = Engine.attemptMove(s4c, "L");
+  check("slange: krasj pa stralen", r4c.result === "crash", r4c.result);
+  check("slange: freeSteps frem til blokk", r4c.freeSteps === 1, "" + r4c.freeSteps);
+
   // Å fjerne en strek frigjør plass for en annen
   var s6 = Engine.createBoard({ rows: 1, cols: 3, pieces: [
     { id: "a", cells: [{ r: 0, c: 0 }], dir: "L" },

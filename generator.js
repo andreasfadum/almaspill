@@ -107,13 +107,24 @@
     return path;
   }
 
-  // Velg retning mot nærmeste kant (kortest vei = mest sannsynlig klar).
-  function dirTowardNearestEdge(cells, rows, cols) {
-    var b = Engine.bbox(cells);
-    var dist = { U: b.minR, D: rows - 1 - b.maxR, L: b.minC, R: cols - 1 - b.maxC };
-    var best = "U", bestD = Infinity;
-    ["U", "D", "L", "R"].forEach(function (d) {
-      if (dist[d] < bestD) { bestD = dist[d]; best = d; }
+  // Avstand fra en celle til kanten i en gitt retning.
+  function edgeDist(cell, dir, rows, cols) {
+    if (dir === "U") return cell.r;
+    if (dir === "D") return rows - 1 - cell.r;
+    if (dir === "L") return cell.c;
+    return cols - 1 - cell.c;
+  }
+
+  // Velg pilretning blant strekens GYLDIGE ende-retninger (pilen kan kun sitte i
+  // en ende og peke utover langs aksen). Foretrekk den enden som er nærmest en
+  // kant — kortest stråle ut = mest sannsynlig klar.
+  function chooseEndpointDir(cells, rows, cols) {
+    var dirs = Engine.endpointDirs({ cells: cells });
+    var best = dirs[0], bestD = Infinity;
+    dirs.forEach(function (dir) {
+      var head = Engine.headCell({ cells: cells, dir: dir });
+      var dd = edgeDist(head, dir, rows, cols);
+      if (dd < bestD) { bestD = dd; best = dir; }
     });
     return best;
   }
@@ -123,7 +134,7 @@
       return {
         id: "p" + i,
         cells: seg,
-        dir: dirTowardNearestEdge(seg, rows, cols),
+        dir: chooseEndpointDir(seg, rows, cols),
         color: iconCells.color,
       };
     });
@@ -153,7 +164,7 @@
       for (var i = 0; i < ids.length && !solvedNow; i++) {
         var piece = findPiece(level, ids[i]);
         var saved = piece.dir;
-        var dirs = shuffle(Engine.ALL_DIRS.slice(), rng);
+        var dirs = shuffle(Engine.endpointDirs(piece).slice(), rng);
         for (var k = 0; k < dirs.length; k++) {
           if (dirs[k] === saved) continue;
           piece.dir = dirs[k];
@@ -187,8 +198,8 @@
     for (var i = 0; i < ids.length && done < target; i++) {
       var piece = findPiece(level, ids[i]);
       var saved = piece.dir;
-      piece.dir = Engine.oppositeDir(piece.dir);
-      if (Engine.simulateSolve(level).solvable) done++;
+      piece.dir = Engine.otherEndpointDir(piece);
+      if (piece.dir !== saved && Engine.simulateSolve(level).solvable) done++;
       else piece.dir = saved;
     }
     return done;

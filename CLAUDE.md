@@ -7,15 +7,20 @@ hvordan du tester, og hva som gjenstår. Les den før du gjør endringer.
 
 Et enkelt, barnevennlig puslespill for nettleser (laget for Alma). Brettet er
 fylt med «streker» — korte, sammenhengende linjestykker (rette eller med ett
-hjørne / L-form) som hver har en pil. Til sammen danner strekene en gjenkjennbar
-**figur** (et ikon). Man trykker på en strek for å sende den UT av brettet i
-pilretningen. Mål: tøm brettet.
+hjørne / L-form). Hver strek har en pil i ÉN ENDE som peker utover langs den
+endens akse. Til sammen danner strekene en gjenkjennbar **figur** (et ikon). Man
+trykker på en strek for å trekke den UT av brettet langs pilens akse. Mål: tøm
+brettet.
 
 ### Spillregler
-- Én strek av gangen. Trykk på en strek → hele streken glir stivt i pilretningen.
-- **Klar vei ut** → streken kjører ut, forsvinner, **+poeng**, og frigjør plass.
-- **Treffer en annen strek** → krasj: streken blinker rødt, **−poeng**, og blir
-  stående (glir tilbake).
+- Én strek av gangen. Trykk på en strek → streken trekker seg ut som en
+  **slange**: «hodet» (enden med pilen) glir i pilretningen, og resten følger
+  etter i hodets spor. En L-form retter seg dermed gradvis ut til en rett linje
+  før den forlater brettet — bevegelsen følger kun pilens akse.
+- **Klar akse ut** (ingen annen strek på strålen fra hodet til kanten) → streken
+  kjører ut, forsvinner, **+poeng**, og frigjør plass.
+- **En annen strek står på strålen** → krasj: streken blinker rødt, **−poeng**,
+  og blir stående (glir tilbake).
 - **Tiden tikker poeng nedover** (poeng trekkes per sekund mens man spiller).
 - **0 poeng = tapt.** Da vises en **high score-tabell** (poeng, tid, levels).
 - Tomt brett = level løst → **konfetti** + «Neste level».
@@ -76,7 +81,12 @@ Husk å slette `node_modules` etterpå (det skal ikke ligge i prosjektmappen).
   hill-climbing på antall fastlåste streker; fjerning av en strek er siste utvei
   (skal normalt være 0 — selvtesten håndhever `removedMax <= 1`).
 - **Strekenes celler lagres i sti-rekkefølge** slik at UI kan tegne dem som
-  sammenhengende, avrundede linjer med hjørner. Ikke sorter dem om.
+  sammenhengende, avrundede linjer med hjørner. Ikke sorter dem om. Hode/hale og
+  gyldige pil-retninger utledes fra første/siste celle (`endpointDirs`,
+  `headCell`) — derfor MÅ endene faktisk være endepunkter i rekkefølgen.
+- **Pilen sitter alltid i en ende.** En streks `dir` skal alltid være én av
+  `Engine.endpointDirs(piece)`. Generatoren (init, `ensureSolvable`,
+  `injectDifficulty`) velger kun blant disse — ikke sett vilkårlige retninger.
 - **Brett-token i UI:** `boardToken` økes ved hvert nye brett; ventende
   animasjons-callbacks sjekker token og avbryter hvis brettet er byttet. Behold
   dette når du endrer animasjoner.
@@ -109,6 +119,14 @@ Reise-modus sorterer automatisk etter størrelse (`bySize`). Kjør `node selftes
   ikoner, tid + poeng-per-sekund, high score-tabell, «Neste level», mobiltilpasset.
 - v3: høyere krasjstraff (25), konfetti ved fullført brett, enda større
   ikonmatriser (24–49 streker per brett), smartere `ensureSolvable` (0 fjernede).
+- v4: **slange-bevegelse**. Pilen sitter nå kun i ÉN ENDE av streken og peker
+  utover langs den endens akse (ikke lenger en stiv figur som glir samlet). Ved
+  trykk glir hodet i pilretningen og kroppen følger i sporet, så en L-form retter
+  seg ut til en rett linje før den forlater brettet. Kollisjon/løsbarhet avgjøres
+  nå av om strålen fra hodet til kanten er fri (`evaluateMove` i `engine.js`).
+  Nye hjelpere: `Engine.endpointDirs`, `headCell`, `otherEndpointDir`. Generator
+  velger pil kun blant gyldige ende-retninger. UI tegner streken på nytt per
+  frame langs et «spor» (`animateSnakeExit` i `index.html`).
 
 ## Backlog / ideer til videre arbeid
 - Flere ikoner (mot 100). Behold tydelige silhuetter + farger.

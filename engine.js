@@ -4,13 +4,15 @@
  * Kjører i både Node (for selvtest) og nettleser (for spillet).
  *
  * En "strek" (piece) er et sammenhengende sett celler — rett ELLER med hjørner
- * (L-form). Streken har en pil som peker i én retning (U/D/L/R).
+ * (L-form). Streken har en pil i ÉN ENDE som peker UTOVER langs den endens akse.
  *
- * Når man trykker på en strek, glir HELE streken stivt i pilretningen, ett steg
- * (én rute) av gangen:
- *   - Klarer alle cellene å forlate brettet uten å treffe noe -> streken kjører
- *     ut, fjernes, +poeng.
- *   - Treffer en celle en annen strek underveis -> krasj, -poeng, blir stående.
+ * Når man trykker på en strek, trekker den seg UT som en slange: «hodet» (enden
+ * med pilen) glir i pilretningen, og resten av streken følger etter i hodets
+ * spor. En L-form retter seg dermed gradvis ut til en rett linje før den
+ * forlater brettet — bevegelsen følger kun pilens akse som en linje.
+ *   - Klar akse ut (ingen annen strek på strålen fra hodet til kanten) -> streken
+ *     sklir ut, fjernes, +poeng.
+ *   - En annen strek står i veien på strålen -> krasj, -poeng, blir stående.
  *   - Null poeng = tapt. Tomt brett = løst.
  *
  * Viktig egenskap: å fjerne en strek frigjør bare ruter og kan aldri blokkere en
@@ -40,6 +42,40 @@
     return { U: "D", D: "U", L: "R", R: "L" }[d];
   }
   var ALL_DIRS = ["U", "D", "L", "R"];
+
+  // Retningen fra celle `from` til nabocelle `to` (de ligger inntil hverandre).
+  function vecToDir(from, to) {
+    if (to.r < from.r) return "U";
+    if (to.r > from.r) return "D";
+    if (to.c < from.c) return "L";
+    return "R";
+  }
+
+  // Gyldige pil-retninger for en strek: pilen kan kun sitte i en ENDE og peke
+  // utover langs den endens akse. Rett strek -> to motsatte retninger. L-form ->
+  // to perpendikulære. Enkeltcelle -> alle fire (et punkt har ingen akse).
+  function endpointDirs(piece) {
+    var cells = piece.cells;
+    if (cells.length === 1) return ALL_DIRS.slice();
+    var dA = vecToDir(cells[1], cells[0]);
+    var dB = vecToDir(cells[cells.length - 2], cells[cells.length - 1]);
+    return [dA, dB];
+  }
+
+  // Hodecellen (der pilen sitter) gitt strekens retning.
+  function headCell(piece) {
+    var cells = piece.cells;
+    if (cells.length === 1) return cells[0];
+    var dA = vecToDir(cells[1], cells[0]);
+    return piece.dir === dA ? cells[0] : cells[cells.length - 1];
+  }
+
+  // Den andre gyldige ende-retningen (brukes for å "snu" pilen til motsatt ende).
+  function otherEndpointDir(piece) {
+    if (piece.cells.length === 1) return oppositeDir(piece.dir);
+    var dirs = endpointDirs(piece);
+    return piece.dir === dirs[0] ? dirs[1] : dirs[0];
+  }
 
   function bbox(cells) {
     var rs = cells.map(function (x) { return x.r; });
@@ -88,27 +124,28 @@
     return grid;
   }
 
-  // Sveip streken steg for steg i pilretningen.
+  // Slange-bevegelse: HODET glir steg for steg langs pilens akse, og kroppen
+  // følger etter i hodets spor. Da må kun strålen fra hodet være klar — kroppen
+  // beveger seg bare inn i ruter den selv akkurat forlot. Derfor avgjøres alt av
+  // om strålen fra hodet til kanten er fri for andre streker.
   // Returnerer {result:'exit', steps} eller
   //            {result:'crash', freeSteps, collisionCell, blockerId}.
   function evaluateMove(state, piece) {
     var d = DELTA[piece.dir];
+    var head = headCell(piece);
     var grid = occupancy(state, piece.id);
     var maxStep = state.rows + state.cols + 4;
     for (var k = 1; k <= maxStep; k++) {
-      var anyIn = false;
-      for (var i = 0; i < piece.cells.length; i++) {
-        var nr = piece.cells[i].r + d.r * k;
-        var nc = piece.cells[i].c + d.c * k;
-        if (inBounds(state, nr, nc)) {
-          anyIn = true;
-          var b = grid[nr + "," + nc];
-          if (b) {
-            return { result: "crash", freeSteps: k - 1, collisionCell: { r: nr, c: nc }, blockerId: b };
-          }
-        }
+      var nr = head.r + d.r * k;
+      var nc = head.c + d.c * k;
+      if (!inBounds(state, nr, nc)) {
+        // Hodet forlater brettet; kroppen følger sporet ut -> full utkjøring.
+        return { result: "exit", steps: k + piece.cells.length - 1 };
       }
-      if (!anyIn) return { result: "exit", steps: k };
+      var b = grid[nr + "," + nc];
+      if (b) {
+        return { result: "crash", freeSteps: k - 1, collisionCell: { r: nr, c: nc }, blockerId: b };
+      }
     }
     return { result: "exit", steps: maxStep };
   }
@@ -179,6 +216,10 @@
     DELTA: DELTA,
     ALL_DIRS: ALL_DIRS,
     oppositeDir: oppositeDir,
+    vecToDir: vecToDir,
+    endpointDirs: endpointDirs,
+    headCell: headCell,
+    otherEndpointDir: otherEndpointDir,
     bbox: bbox,
     createBoard: createBoard,
     inBounds: inBounds,

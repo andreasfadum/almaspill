@@ -263,13 +263,9 @@
       g.appendChild(pl);
     }
 
-    // Pilhode på den cellen som ligger lengst frem i pilretningen.
+    // Pilhode i ENDEN (hodecellen) der streken trekker seg ut, pekende utover.
     var d = Engine.DELTA[piece.dir];
-    var lead = piece.cells[0], bestProj = -Infinity;
-    piece.cells.forEach(function (c) {
-      var proj = c.r * d.r + c.c * d.c;
-      if (proj > bestProj) { bestProj = proj; lead = c; }
-    });
+    var lead = Engine.headCell(piece);
     var lc = center(lead), s = cell * 0.24;
     var ax = lc.x + d.c * cell * 0.30, ay = lc.y + d.r * cell * 0.30;
     var head = svgEl("polygon", { points: arrowPts(ax, ay, s, piece.dir), fill: "#ffffff", class: "stroke" });
@@ -302,23 +298,7 @@
     busy = true;
 
     if (info === null) {
-      var vec = exitVector(piece);
-      g.style.transition = "transform .42s ease-in";
-      requestAnimationFrame(function () { g.style.transform = "translate(" + vec.x + "px," + vec.y + "px)"; });
-      var done = false;
-      var finish = function () {
-        if (done || token !== boardToken) return; done = true;
-        var res = Engine.attemptMove(state, id);
-        if (g.parentNode) g.parentNode.removeChild(g);
-        peakScore = Math.max(peakScore, state.score);
-        scoreEl.textContent = state.score;
-        floatText("+" + CONFIG.exitReward, "var(--good)");
-        statusEl.textContent = "Figur: " + currentIcon.name + "  ·  " + Object.keys(state.pieces).length + " streker igjen";
-        busy = false;
-        if (res.solved) onWin();
-      };
-      g.addEventListener("transitionend", finish);
-      setTimeout(finish, 600);
+      animateSnakeExit(g, piece, id, token);
     } else {
       var nudge = crashVector(piece, info.freeSteps);
       g.style.setProperty("--tx", nudge.x + "px");
@@ -341,12 +321,72 @@
     }
   }
 
-  function exitVector(piece) {
-    var b = Engine.bbox(piece.cells);
-    if (piece.dir === "R") return { x: (state.cols - b.minC + 1) * cell, y: 0 };
-    if (piece.dir === "L") return { x: -(b.maxC + 2) * cell, y: 0 };
-    if (piece.dir === "D") return { x: 0, y: (state.rows - b.minR + 1) * cell };
-    return { x: 0, y: -(b.maxR + 2) * cell };
+  // Slange-utkjøring: hodet (enden med pilen) glir langs aksen, og kroppen følger
+  // etter i hodets spor. En L-form retter seg dermed ut til en rett linje før den
+  // forlater brettet. Vi tegner streken på nytt hver frame langs et "spor" som er
+  // kroppens celler etterfulgt av strålen fra hodet og ut av brettet.
+  function cellEq(a, b) { return a.r === b.r && a.c === b.c; }
+  function animateSnakeExit(g, piece, id, token) {
+    var d = Engine.DELTA[piece.dir];
+    var head = Engine.headCell(piece);
+    var hc = center(head);
+    // Cellerekkefølge fra HALE til HODE (slik at siste punkt er hodet).
+    var ordered = cellEq(piece.cells[0], head) ? piece.cells.slice().reverse() : piece.cells.slice();
+    var bodyLen = ordered.length;
+    var track = ordered.map(center);
+    var rayLen = bodyLen + state.rows + state.cols + 2;
+    for (var i = 1; i <= rayLen; i++) {
+      track.push({ x: hc.x + d.c * i * cell, y: hc.y + d.r * i * cell });
+    }
+    // Punkt langs sporet ved kontinuerlig indeks (ekstrapolerer langs aksen utenfor).
+    function ptAt(idx) {
+      if (idx <= 0) return track[0];
+      var last = track.length - 1;
+      if (idx >= last) {
+        var base = track[last];
+        return { x: base.x + d.c * (idx - last) * cell, y: base.y + d.r * (idx - last) * cell };
+      }
+      var i0 = Math.floor(idx), f = idx - i0, a = track[i0], b = track[i0 + 1];
+      return { x: a.x + (b.x - a.x) * f, y: a.y + (b.y - a.y) * f };
+    }
+    var shape = g.querySelector("polyline") || g.querySelector("rect");
+    var arrow = g.querySelector("polygon");
+    if (arrow && arrow.parentNode) arrow.parentNode.removeChild(arrow);
+    var thickness = cell * 0.62;
+    var startHead = bodyLen - 1, endHead = track.length - 1 + bodyLen;
+    var dur = Math.min(950, 260 + (endHead - startHead) * 42);
+    var t0 = null, done = false;
+
+    function finish() {
+      if (done || token !== boardToken) return; done = true;
+      var res = Engine.attemptMove(state, id);
+      if (g.parentNode) g.parentNode.removeChild(g);
+      peakScore = Math.max(peakScore, state.score);
+      scoreEl.textContent = state.score;
+      floatText("+" + CONFIG.exitReward, "var(--good)");
+      statusEl.textContent = "Figur: " + currentIcon.name + "  ·  " + Object.keys(state.pieces).length + " streker igjen";
+      busy = false;
+      if (res.solved) onWin();
+    }
+    function frame(t) {
+      if (token !== boardToken) return; // brettet er byttet ut
+      if (t0 == null) t0 = t;
+      var p = Math.min(1, (t - t0) / dur);
+      var ease = p * p; // akselererer ut — slangen "skyter" mot kanten
+      var headIdx = startHead + ease * (endHead - startHead);
+      var pts = [];
+      for (var j = 0; j < bodyLen; j++) pts.push(ptAt(headIdx - (bodyLen - 1) + j));
+      if (shape.tagName.toLowerCase() === "polyline") {
+        shape.setAttribute("points", pts.map(function (q) { return q.x + "," + q.y; }).join(" "));
+      } else {
+        var q = pts[bodyLen - 1];
+        shape.setAttribute("x", q.x - thickness / 2);
+        shape.setAttribute("y", q.y - thickness / 2);
+      }
+      if (p < 1) requestAnimationFrame(frame);
+      else finish();
+    }
+    requestAnimationFrame(frame);
   }
   function crashVector(piece, freeSteps) {
     var n = Math.max(freeSteps, 0.25);
