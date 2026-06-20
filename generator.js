@@ -229,20 +229,27 @@
 
   /*
    * Hovedinngang: lag et brett fra et ikon.
-   *   opts: { seed, difficulty (0..1), maxArm, cornerChance }
+   *   opts: { seed, difficulty (0..1), maxArm, cornerChance, pad }
+   * pad legger `pad` tomme rader/kolonner rundt figuren på alle fire sider, så
+   * brettet blir større og silhuetten tydeligere (figuren flyttes inn til midten).
    */
   function generate(icon, opts) {
     opts = opts || {};
     var seed = opts.seed == null ? Math.floor(Math.random() * 1e9) : opts.seed;
     var difficulty = opts.difficulty == null ? 0.5 : opts.difficulty;
+    var pad = opts.pad || 0;
     var iconCells = Icons.iconToCells(icon);
+    var rows = iconCells.rows + pad * 2, cols = iconCells.cols + pad * 2;
+    var cells = pad
+      ? iconCells.cells.map(function (c) { return { r: c.r + pad, c: c.c + pad }; })
+      : iconCells.cells;
     var rng = makeRng(seed);
 
-    var segments = partition(iconCells.cells, iconCells.rows, iconCells.cols, rng, {
+    var segments = partition(cells, rows, cols, rng, {
       maxArm: opts.maxArm || 3,
       cornerChance: opts.cornerChance == null ? 0.55 : opts.cornerChance,
     });
-    var level = buildLevel(iconCells, segments, iconCells.rows, iconCells.cols);
+    var level = buildLevel(iconCells, segments, rows, cols);
     var removed = ensureSolvable(level, rng);
     var flips = injectDifficulty(level, rng, difficulty);
 

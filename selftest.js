@@ -42,6 +42,14 @@ function check(name, cond, detail) {
     Engine.createBoard({ rows: 1, cols: 3, pieces: [{ id: "a", cells: [{ r: 0, c: 0 }], dir: "R" }] }), "a"
   ).scoreDelta === Engine.DEFAULT_CONFIG.exitReward);
 
+  // reward-override: utkjøring kan i stedet STRAFFES (blinkende/feil kant)
+  var so = Engine.createBoard({ rows: 1, cols: 3, pieces: [{ id: "a", cells: [{ r: 0, c: 0 }], dir: "R" }] }, { startScore: 50 });
+  var ro = Engine.attemptMove(so, "a", { reward: -100 });
+  check("override: negativ scoreDelta", ro.scoreDelta === -100, "" + ro.scoreDelta);
+  check("override: score gulvet til 0", ro.score === 0, "" + ro.score);
+  check("override: gameOver ved 0", ro.gameOver === true);
+  check("override: streken fjernet", !so.pieces["a"]);
+
   // Rett strek blokkert -> krasj
   var s2 = Engine.createBoard({ rows: 1, cols: 3, pieces: [
     { id: "a", cells: [{ r: 0, c: 0 }], dir: "R" },
@@ -167,6 +175,22 @@ check("generator: hjornestreker finnes", cornerTotal > 0, "totalt hjorner=" + co
 // Vanskelighet
 var trivialRate = highDiffLevels ? trivialCount / highDiffLevels : 0;
 check("vanskelighet: faa trivielle paa hoy diff", trivialRate < 0.25, "triviell andel=" + (trivialRate * 100).toFixed(1) + "%");
+
+// Padding: større brett (tomme rader/kolonner rundt figuren) skal fortsatt være
+// løsbart, og dimensjonene skal vokse med 2*pad.
+var padFails = 0, padChecked = 0;
+Icons.ICONS.slice(0, 4).forEach(function (icon) {
+  [1, 2, 3].forEach(function (pad) {
+    for (var s = 1; s <= 10; s++) {
+      var base = Generator.generate(icon, { seed: s, difficulty: 0.5, pad: 0 });
+      var padded = Generator.generate(icon, { seed: s, difficulty: 0.5, pad: pad });
+      padChecked++;
+      if (padded.rows !== base.rows + 2 * pad || padded.cols !== base.cols + 2 * pad) padFails++;
+      if (!Generator.metrics(padded).solvable) padFails++;
+    }
+  });
+});
+check("padding: dimensjoner + losbarhet", padFails === 0, "feil=" + padFails + " av " + padChecked);
 
 // ---------------------------------------------------------------------------
 // Rapport

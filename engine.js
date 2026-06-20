@@ -171,21 +171,25 @@
     return Object.keys(state.pieces).length === 0;
   }
 
-  // Forsøk å flytte en strek. opts.bonus (valgfri) er en hurtighetsbonus som
-  // legges til utkjøringspoengene — beregnes i UI ut fra hvor raskt man spiller.
+  // Forsøk å flytte en strek.
+  //   opts.bonus  (valgfri) hurtighetsbonus lagt til utkjøringspoengene.
+  //   opts.reward (valgfri) OVERSTYRER poengendringen helt — brukes når en
+  //               utkjøring i stedet skal STRAFFES (f.eks. feil/blinkende kant),
+  //               da sendes et negativt tall inn. Streken fjernes uansett.
   function attemptMove(state, id, opts) {
     var piece = state.pieces[id];
     if (!piece) return { result: "none" };
     var m = evaluateMove(state, piece);
     if (m.result === "exit") {
       var bonus = (opts && opts.bonus) ? opts.bonus : 0;
-      var reward = state.config.exitReward + bonus;
+      var reward = (opts && opts.reward != null) ? opts.reward : state.config.exitReward + bonus;
       delete state.pieces[id];
       state.score += reward;
+      if (state.score < 0) state.score = 0;
       return {
         result: "exit", id: id, steps: m.steps, bonus: bonus, reward: reward,
         scoreDelta: reward, score: state.score,
-        solved: isSolved(state), gameOver: false,
+        solved: isSolved(state), gameOver: state.score <= 0,
       };
     }
     state.score -= state.config.crashPenalty;

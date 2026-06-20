@@ -37,7 +37,7 @@
       ],
     },
     {
-      name: "Maane", color: "#f4cf5a",
+      name: "Måne", color: "#f4cf5a",
       grid: [
         ".....#####...",
         "...########..",
@@ -143,7 +143,7 @@
       ],
     },
     {
-      name: "Baat", color: "#2c8fc9",
+      name: "Båt", color: "#2c8fc9",
       grid: [
         "......#......",
         "......##.....",

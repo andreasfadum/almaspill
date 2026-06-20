@@ -120,6 +120,16 @@
   }
   .pill.bump { animation: pillBump .42s cubic-bezier(.2,1.6,.4,1); }
   @keyframes pillBump { 0%{transform:scale(1);} 35%{transform:scale(1.4);} 100%{transform:scale(1);} }
+
+  /* Blinkende farekant (level 10+) */
+  .danger-edge { animation: edgeBlink .7s ease-in-out infinite; }
+  @keyframes edgeBlink { 0%,100%{opacity:0.95;} 50%{opacity:0.18;} }
+  #boardWrap.flash { animation: boardFlash .45s ease-out; }
+  @keyframes boardFlash {
+    0%   { box-shadow: 0 0 0 0 rgba(231,76,60,0); }
+    25%  { box-shadow: 0 0 0 7px rgba(231,76,60,0.55), 0 6px 18px rgba(0,0,0,0.08); }
+    100% { box-shadow: 0 6px 18px rgba(0,0,0,0.08); }
+  }
 </style>
 </head>
 <body>
@@ -169,11 +179,21 @@
   var overlay = $("overlay"), overlayTitle = $("overlayTitle"), overlayBody = $("overlayBody"), overlayBtns = $("overlayBtns");
   var picker = $("picker");
 
-  var state = null, cell = 48, busy = false, boardToken = 0;
+  var state = null, cell = 48, boardToken = 0;
   var mode = "journey", journeyIndex = 0;
   var journeyIcons = Icons.bySize();
   var runningScore = CONFIG.startScore, peakScore = CONFIG.startScore, levelsCompleted = 0;
-  var currentIcon = null, currentDiff = 0.5;
+  var currentIcon = null, currentDiff = 0.5, currentPad = 0;
+  var crashCooldown = {};              // streker i kort nedkjøling etter krasj (hindrer dobbeltstraff)
+
+  // Blinkende farekant (level 10+). dangerMode: 0=ingen, 1=unngå (−100),
+  // 2=må treffe (−200 ellers). dangerEdge: hvilken kant blinker nå (U/D/L/R).
+  var DANGER_INTERVAL_MS = 3000;       // bytter kant hvert 3. sekund
+  var EDGE_AVOID_PENALTY = 100;        // level 10–19: straff for å treffe blinkende kant
+  var EDGE_REQUIRE_PENALTY = 200;      // level 20+: straff for å treffe FEIL kant
+  var DANGER_LEVEL_AVOID = 10, DANGER_LEVEL_REQUIRE = 20;
+  var dangerMode = 0, dangerEdge = null, dangerTimerId = null;
+  var rulesShown = { avoid: false, require: false }; // regel-skjerm vises én gang per runde
   var accumMs = 0, lastTick = 0, timerActive = false, timerId = null, secApplied = 0;
   var TIME_PENALTY_GRACE_SEC = 10;    // ingen tidsstraff de første 10 sekundene
   var COMBO_WINDOW = 2500;            // ms: fjern raskere enn dette for å bygge kjede
@@ -231,21 +251,51 @@
   // -- Brett-oppsett --------------------------------------------------------
   function difficultyForIndex(i) { return Math.min(0.92, 0.12 + i * 0.13); } // level 1 enkel, deretter hardere
 
+  // Nåværende level-nummer (1-basert). Fri modus har ikke levels -> 1 som basis.
+  function currentLevel() { return mode === "journey" ? (journeyIndex + 1) : 1; }
+
+  // Padding (tomme rader/kolonner rundt figuren). Ingen til og med level 5,
+  // deretter mer luft så silhuetten blir tydeligere. Maks 3.
+  function padForIndex(i) {
+    var level = i + 1;
+    return level <= 5 ? 0 : Math.min(3, level - 5);
+  }
+
+  // Kollisjonsstraff vokser med level: 2× grunnstraff allerede fra level 1, og
+  // +grunnstraff per level deretter (level L -> base*(1+L)).
+  function crashForLevel(level) { return CONFIG.crashPenalty * (1 + level); }
+
+  // Faremodus ut fra level: blinkende kant fra level 10, "kun riktig kant" fra 20.
+  function dangerModeForLevel(level) {
+    if (mode !== "journey") return 0;
+    if (level >= DANGER_LEVEL_REQUIRE) return 2;
+    if (level >= DANGER_LEVEL_AVOID) return 1;
+    return 0;
+  }
+
   function startRun(newMode) {
     mode = newMode;
     runningScore = CONFIG.startScore; peakScore = CONFIG.startScore; levelsCompleted = 0;
+    rulesShown = { avoid: false, require: false };
+    stopDanger();
     startTimer();
   }
 
-  function loadLevel(icon, difficulty, seed) {
-    currentIcon = icon; currentDiff = difficulty;
+  function loadLevel(icon, difficulty, seed, pad) {
+    currentIcon = icon; currentDiff = difficulty; currentPad = pad || 0;
     var level = Generator.generate(icon, {
       seed: seed == null ? Math.floor(Math.random() * 1e9) : seed,
       difficulty: difficulty,
+      pad: pad || 0,
     });
-    state = Engine.createBoard(level, { startScore: runningScore });
-    boardToken++; busy = false; // nytt brett: avbryt eventuelle ventende animasjoner
+    state = Engine.createBoard(level, {
+      startScore: runningScore,
+      crashPenalty: crashForLevel(currentLevel()),
+    });
+    boardToken++;                       // nytt brett: avbryt ventende animasjoner (token-sjekk)
+    crashCooldown = {};
     lastExitAccum = accumMs; combo = 0; // hurtighetsbonus starter på nytt per brett
+    configureDanger();                  // start/stopp blinkende farekant for dette levelet
     fitCell(level); render();
     statusEl.textContent = "Figur: " + icon.name + "  ·  " + Object.keys(state.pieces).length + " streker igjen";
     hideOverlay();
@@ -267,6 +317,7 @@
     for (var r = 0; r <= rows; r++) gridLine(0, r * cell, cols * cell, r * cell);
     for (var c = 0; c <= cols; c++) gridLine(c * cell, 0, c * cell, rows * cell);
     Object.keys(state.pieces).forEach(function (id) { drawPiece(state.pieces[id]); });
+    drawDangerEdge(); // tegnes sist så den ligger øverst
     scoreEl.textContent = state.score;
     levelEl.textContent = mode === "journey" ? (journeyIndex + 1) : "★";
   }
@@ -328,42 +379,130 @@
     return el;
   }
 
+  // -- Blinkende farekant ---------------------------------------------------
+  function randomEdge(not) {
+    var edges = ["U", "D", "L", "R"].filter(function (e) { return e !== not; });
+    return edges[Math.floor(Math.random() * edges.length)];
+  }
+  function removeDangerEdge() {
+    var ex = svg.querySelectorAll(".danger-edge");
+    for (var i = 0; i < ex.length; i++) ex[i].parentNode.removeChild(ex[i]);
+  }
+  function drawDangerEdge() {
+    removeDangerEdge();
+    if (!dangerMode || !dangerEdge || !state) return;
+    var W = state.cols * cell, H = state.rows * cell, t = Math.max(7, cell * 0.3);
+    var x = 0, y = 0, w = W, h = H;
+    if (dangerEdge === "U") { h = t; }
+    else if (dangerEdge === "D") { y = H - t; h = t; }
+    else if (dangerEdge === "L") { w = t; }
+    else { x = W - t; w = t; }
+    // Rød = farlig (unngå), grønn = mål (må treffes) fra level 20.
+    var fill = dangerMode === 2 ? "#2ecc71" : "#e74c3c";
+    var rect = svgEl("rect", { x: x, y: y, width: w, height: h, fill: fill, class: "danger-edge" });
+    svg.appendChild(rect);
+  }
+  function configureDanger() {
+    stopDanger();
+    dangerMode = dangerModeForLevel(currentLevel());
+    if (!dangerMode) { dangerEdge = null; return; }
+    dangerEdge = randomEdge(null);
+    drawDangerEdge();
+    dangerTimerId = setInterval(function () {
+      if (overlayShown()) return;            // ikke bytt mens en skjerm vises
+      dangerEdge = randomEdge(dangerEdge);   // alltid en ny kant
+      drawDangerEdge();
+    }, DANGER_INTERVAL_MS);
+  }
+  function stopDanger() {
+    if (dangerTimerId) { clearInterval(dangerTimerId); dangerTimerId = null; }
+    removeDangerEdge();
+  }
+  // Straff (poeng) for å kjøre en strek UT i retning `dir` akkurat nå. 0 = trygt.
+  function edgePenaltyFor(dir) {
+    if (dangerMode === 1) return dir === dangerEdge ? EDGE_AVOID_PENALTY : 0;
+    if (dangerMode === 2) return dir === dangerEdge ? 0 : EDGE_REQUIRE_PENALTY;
+    return 0;
+  }
+  function flashDanger() {
+    boardWrap.classList.remove("flash"); void boardWrap.offsetWidth; boardWrap.classList.add("flash");
+  }
+
   // -- Interaksjon ----------------------------------------------------------
+  // Ingen global lås: man kan trykke på streker hele tiden. Et trekk avgjøres
+  // logisk MED ÉN GANG (poeng + fjerning), og slange-animasjonen er rent kosmetisk
+  // så poeng-popups aldri hindrer flyten. Krasj gir en kort per-strek nedkjøling.
   function onPieceClick(id) {
-    if (busy || !state.pieces[id]) return;
-    var piece = state.pieces[id];
+    var piece = state && state.pieces[id];
+    if (!piece || crashCooldown[id]) return;
     var info = Engine.firstCollision(state, piece);
     var g = svg.querySelector('[data-id="' + id + '"]');
     var token = boardToken;
     var headPos = boardPointToWrap(Engine.headCell(piece));
-    busy = true;
 
     if (info === null) {
+      var penalty = edgePenaltyFor(piece.dir);
+      if (penalty > 0) {
+        // Utkjøring i feil/blinkende retning: streken forsvinner, men straffes hardt.
+        combo = 0;
+        var resP = Engine.attemptMove(state, id, { reward: -penalty });
+        if (g) { g.setAttribute("data-id", "__gone__"); animateSnakeExit(g, piece, token); }
+        afterExitUI(resP, headPos);
+        popScore("−" + penalty, "var(--bad)", headPos, true);
+        flashDanger();
+        statusEl.textContent = dangerMode === 2
+          ? "Feil kant! Du må treffe den blinkende kanten. −" + penalty + " poeng."
+          : "Au! Du traff den blinkende kanten. −" + penalty + " poeng.";
+        return;
+      }
+      // Vanlig utkjøring med hurtighetsbonus.
       var bonus = computeExitBonus();
-      animateSnakeExit(g, piece, id, token, bonus, headPos);
+      var res = Engine.attemptMove(state, id, { bonus: bonus.total });
+      if (g) { g.setAttribute("data-id", "__gone__"); animateSnakeExit(g, piece, token); }
+      afterExitUI(res, headPos);
+      var color = bonus.total > 0 ? "#f5a623" : "var(--good)";
+      popScore("+" + res.reward, color, headPos, false);
+      if (bonus.combo > 0 && bonus.combo % COMBO_SHOW_EVERY === 0) showCombo("🔥 Kjede ×" + bonus.combo + "!", headPos);
+      else if (bonus.ended >= COMBO_END_MIN) showCombo("Kjede ×" + bonus.ended + " ferdig", headPos);
+      if (!res.gameOver && !res.solved) {
+        statusEl.textContent = "Figur: " + currentIcon.name + "  ·  " + Object.keys(state.pieces).length + " streker igjen";
+      }
     } else {
+      // Krasj mot annen strek: rist, straff, blir stående.
+      crashCooldown[id] = true;
+      var endedChain = combo; combo = 0;
       var nudge = crashVector(piece, info.freeSteps);
-      g.style.setProperty("--tx", nudge.x + "px");
-      g.style.setProperty("--ty", nudge.y + "px");
-      g.style.transition = "transform .12s ease-out";
-      g.style.transform = "translate(" + nudge.x + "px," + nudge.y + "px)";
-      g.classList.add("crash");
-      var endedChain = combo; combo = 0; // krasj bryter kjeden
+      if (g) {
+        g.style.setProperty("--tx", nudge.x + "px");
+        g.style.setProperty("--ty", nudge.y + "px");
+        g.style.transition = "transform .12s ease-out";
+        g.style.transform = "translate(" + nudge.x + "px," + nudge.y + "px)";
+        g.classList.add("crash");
+      }
       var res2 = Engine.attemptMove(state, id);
-      scoreEl.textContent = state.score;
-      bumpScore();
-      popScore("−" + CONFIG.crashPenalty, "var(--bad)", headPos, true);
+      scoreEl.textContent = state.score; bumpScore();
+      popScore("−" + state.config.crashPenalty, "var(--bad)", headPos, true);
       if (endedChain >= COMBO_END_MIN) showCombo("Kjede ×" + endedChain + " ferdig", headPos);
-      statusEl.textContent = "Au! Den krasjet. Du mistet " + CONFIG.crashPenalty + " poeng.";
+      statusEl.textContent = "Au! Den krasjet. Du mistet " + state.config.crashPenalty + " poeng.";
       setTimeout(function () {
         if (token !== boardToken) return;
-        g.classList.remove("crash");
-        g.style.transition = "transform .18s ease-out";
-        g.style.transform = "translate(0,0)";
-        busy = false;
+        if (g) {
+          g.classList.remove("crash");
+          g.style.transition = "transform .18s ease-out";
+          g.style.transform = "translate(0,0)";
+        }
+        delete crashCooldown[id];
         if (res2.gameOver) onLose();
       }, 360);
     }
+  }
+
+  // Felles oppdatering etter en utkjøring (poeng-pille, tap/seier).
+  function afterExitUI(res, headPos) {
+    peakScore = Math.max(peakScore, state.score);
+    scoreEl.textContent = state.score; bumpScore();
+    if (res.gameOver) onLose();
+    else if (res.solved) onWin();
   }
 
   // Slange-utkjøring: hodet (enden med pilen) glir langs aksen, og kroppen følger
@@ -371,7 +510,9 @@
   // forlater brettet. Vi tegner streken på nytt hver frame langs et "spor" som er
   // kroppens celler etterfulgt av strålen fra hodet og ut av brettet.
   function cellEq(a, b) { return a.r === b.r && a.c === b.c; }
-  function animateSnakeExit(g, piece, id, token, bonus, headPos) {
+  // Rent KOSMETISK slange-animasjon (poeng/fjerning er allerede avgjort i
+  // onPieceClick). Animerer `g` ut av brettet og fjerner elementet til slutt.
+  function animateSnakeExit(g, piece, token) {
     var d = Engine.DELTA[piece.dir];
     var head = Engine.headCell(piece);
     var hc = center(head);
@@ -404,24 +545,7 @@
 
     function finish() {
       if (done || token !== boardToken) return; done = true;
-      var res = Engine.attemptMove(state, id, { bonus: bonus.total });
       if (g.parentNode) g.parentNode.removeChild(g);
-      peakScore = Math.max(peakScore, state.score);
-      scoreEl.textContent = state.score;
-      bumpScore();
-      // "Smell": gull og ekstra stort når man var rask, ellers vanlig grønt.
-      var color = bonus.total > 0 ? "#f5a623" : "var(--good)";
-      popScore("+" + res.reward, color, headPos, false);
-      // Kjede-popup vises sjelden: ved hver 10. streak, eller når en lang kjede
-      // tok slutt med denne (for sene) fjerningen.
-      if (bonus.combo > 0 && bonus.combo % COMBO_SHOW_EVERY === 0) {
-        showCombo("🔥 Kjede ×" + bonus.combo + "!", headPos);
-      } else if (bonus.ended >= COMBO_END_MIN) {
-        showCombo("Kjede ×" + bonus.ended + " ferdig", headPos);
-      }
-      statusEl.textContent = "Figur: " + currentIcon.name + "  ·  " + Object.keys(state.pieces).length + " streker igjen";
-      busy = false;
-      if (res.solved) onWin();
     }
     function frame(t) {
       if (token !== boardToken) return; // brettet er byttet ut
@@ -501,8 +625,9 @@
   var confettiRaf = null;
   function burstConfetti() {
     var canvas = $("confetti");
-    if (!canvas.getContext) return;
-    var ctx = canvas.getContext("2d");
+    if (!canvas || !canvas.getContext) return;
+    var ctx;
+    try { ctx = canvas.getContext("2d"); } catch (e) { return; } // canvas utilgjengelig
     if (!ctx) return; // ingen canvas-støtte (f.eks. i testmiljø)
     canvas.width = window.innerWidth; canvas.height = window.innerHeight;
     var colors = ["#e8485f", "#f2b705", "#6c5ce7", "#2ecc71", "#36b1c9", "#ef6c3a", "#f4cf5a"];
@@ -540,33 +665,30 @@
   // -- Slutt-tilstander -----------------------------------------------------
   function onWin() {
     burstConfetti();
+    stopDanger();
+    var doneLevel = currentLevel();
     runningScore = state.score; peakScore = Math.max(peakScore, state.score); levelsCompleted++;
     if (mode === "journey") {
-      if (journeyIndex + 1 >= journeyIcons.length) {
-        stopTimer();
-        var list = recordScore(makeEntry());
-        showOverlay("🏆 Du klarte alle!", hsTable(list, makeEntry()) +
-          "<div class='hint'>Tid " + fmtTime(elapsedSec()) + " · " + peakScore + " poeng</div>", [
-          btn("Spill igjen", function () { startRun("journey"); journeyIndex = 0; nextJourney(); }),
-        ]);
-        return;
-      }
-      showOverlay("🎉 Level klart!", "<div class='hint'>Du løste " + currentIcon.name + "!</div>",
+      // Reisen er endeløs: ikonene sykler med stadig høyere vanskelighet.
+      showOverlay("🎉 Level " + doneLevel + " klart!",
+        "<div class='hint'>Du løste <b>" + currentIcon.name + "</b> — det var <b>level " + doneLevel +
+        "</b>!<br>Poeng nå: " + state.score + "</div>",
         [btn("Neste level →", function () { journeyIndex++; nextJourney(); })]);
     } else {
       showOverlay("🎉 Figur ferdig!", "<div class='hint'>Du løste " + currentIcon.name + "!</div>",
-        [btn("Velg ny figur", openPicker), btn("Samme figur igjen", function () { loadLevel(currentIcon, currentDiff); })]);
+        [btn("Velg ny figur", openPicker), btn("Samme figur igjen", function () { loadLevel(currentIcon, currentDiff, null, currentPad); })]);
     }
   }
 
   function onLose() {
+    stopDanger();
     stopTimer();
     var entry = makeEntry();
     var list = recordScore(entry);
-    showOverlay("💔 Du tapte", hsTable(list, entry), [
+    showOverlay("💔 Du tapte", "<div class='hint'>Du kom til level " + currentLevel() + ".</div>" + hsTable(list, entry), [
       btn("Prøv igjen", function () {
         if (mode === "journey") { startRun("journey"); journeyIndex = 0; nextJourney(); }
-        else { startRun("free"); loadLevel(currentIcon, currentDiff); }
+        else { startRun("free"); loadLevel(currentIcon, currentDiff, null, currentPad); }
       }),
     ]);
   }
@@ -599,10 +721,32 @@
   }
 
   // -- Moduser --------------------------------------------------------------
+  // Endeløs reise: ikonene sykler, vanskelighet + padding øker, og nye regler
+  // introduseres på egne skjermer ved level 10 og 20.
   function nextJourney() {
     mode = "journey";
-    if (journeyIndex >= journeyIcons.length) { journeyIndex = 0; }
-    loadLevel(journeyIcons[journeyIndex], difficultyForIndex(journeyIndex));
+    var level = journeyIndex + 1;
+    if (level === DANGER_LEVEL_AVOID && !rulesShown.avoid) { rulesShown.avoid = true; return showRule(1); }
+    if (level === DANGER_LEVEL_REQUIRE && !rulesShown.require) { rulesShown.require = true; return showRule(2); }
+    var icon = journeyIcons[journeyIndex % journeyIcons.length];
+    loadLevel(icon, difficultyForIndex(journeyIndex), null, padForIndex(journeyIndex));
+  }
+
+  function showRule(m) {
+    stopDanger();
+    if (m === 1) {
+      showOverlay("⚠️ Ny regel fra level 10",
+        "<div class='hint' style='line-height:1.5'>Én av kantene <b style='color:#e74c3c'>blinker rødt</b> og bytter side hvert 3. sekund.<br><br>" +
+        "Kjører en strek <b>UT gjennom den blinkende røde kanten</b>, mister du <b>100 poeng</b>!<br><br>" +
+        "Se pilretningen — unngå å sende streker mot den røde kanten.</div>",
+        [btn("Jeg er klar! →", function () { nextJourney(); })]);
+    } else {
+      showOverlay("⚠️ Ny regel fra level 20",
+        "<div class='hint' style='line-height:1.5'>Nå snur det! Du må treffe <b style='color:#2ecc71'>BARE den blinkende grønne kanten</b>.<br><br>" +
+        "Kjører en strek ut et <b>annet sted</b>, mister du <b>200 poeng</b>!<br><br>" +
+        "Vent til riktig kant blinker grønt før du sender streken ut.</div>",
+        [btn("Jeg er klar! →", function () { nextJourney(); })]);
+    }
   }
 
   function openPicker() {
@@ -635,7 +779,7 @@
   // -- Knapper --------------------------------------------------------------
   $("btnJourney").addEventListener("click", function () { startRun("journey"); journeyIndex = 0; nextJourney(); });
   $("btnFree").addEventListener("click", openPicker);
-  $("btnNew").addEventListener("click", function () { if (currentIcon) loadLevel(currentIcon, currentDiff); });
+  $("btnNew").addEventListener("click", function () { if (currentIcon) loadLevel(currentIcon, currentDiff, null, currentPad); });
   $("btnScores").addEventListener("click", function () {
     var list = loadScores();
     showOverlay("🏆 Rekorder", list.length ? hsTable(list, null) : "<div class='hint'>Ingen rekorder ennå. Spill en runde!</div>",

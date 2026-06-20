@@ -26,9 +26,30 @@ brettet.
 - Tomt brett = level løst → **konfetti** + «Neste level».
 
 ### Moduser
-- **Reise**: levels i stigende vanskelighet (ett ikon per level, små figurer
-  først). Poeng og tid følger med gjennom hele reisen.
-- **Velg figur (fri modus)**: spill en valgfri figur fra biblioteket.
+- **Reise** (hovedmodus): en ENDELØS rekke levels i stigende vanskelighet. Ett
+  ikon per level (små figurer først), ikonene sykler når man har vært gjennom
+  alle. Poeng og tid følger med gjennom hele reisen, og level-nummeret vises
+  etter hver løste level. Fra level 6 får brettet mer luft (padding), og nye
+  vanskeligheter introduseres på egne regel-skjermer (se under).
+- **Velg figur (fri modus)**: spill en valgfri figur fra biblioteket (ingen
+  level-progresjon eller farekant).
+
+### Level-mekanikker (kun reise-modus)
+- **Padding fra level 6**: tomme rader/kolonner legges rundt figuren
+  (`padForIndex`) så silhuetten blir tydeligere. `Generator.generate({ pad })`.
+- **Skalert kollisjonsstraff**: krasj mot annen strek koster mer per level — 2×
+  grunnstraff fra level 1, +grunnstraff per level (`crashForLevel`), satt per
+  brett via `createBoard({ crashPenalty })`.
+- **Blinkende farekant fra level 10**: én skjermkant blinker og bytter side hvert
+  3. sekund (tilfeldig av de fire). Level 10–19 (rød): kjører en strek UT gjennom
+  den blinkende kanten → **−100**. Level 20+ (grønn): man må treffe KUN den
+  blinkende kanten — andre kanter → **−200**. Regelen vises på egen skjerm før
+  level 10 og 20 (`showRule`). Logikk: `dangerMode`/`dangerEdge`/`edgePenaltyFor`,
+  straffen påføres via `Engine.attemptMove(state, id, { reward: -penalty })`.
+- **Samtidige trykk**: ingen global lås — et trekk avgjøres logisk med én gang,
+  slange-animasjonen er rent kosmetisk, og poeng-popups (`pointer-events:none`)
+  hindrer aldri at man trykker. Krasj har kun en kort per-strek nedkjøling
+  (`crashCooldown`).
 
 ## Filstruktur (ingen byggesteg, ingen avhengigheter i spillet)
 
@@ -95,7 +116,8 @@ Husk å slette `node_modules` etterpå (det skal ikke ligge i prosjektmappen).
 I `engine.js`, `DEFAULT_CONFIG`:
 - `startScore` (100) — startpoeng
 - `exitReward` (10) — poeng per strek ut
-- `crashPenalty` (25) — poengtap ved krasj
+- `crashPenalty` (25) — grunn-poengtap ved krasj. Skaleres per level i UI
+  (`crashForLevel`: base*(1+level)) og settes per brett via `createBoard`.
 - `timePenaltyPerSec` (2) — poengtap per sekund, men først etter en frist
   (`TIME_PENALTY_GRACE_SEC` = 10 sek i `index.html`; ingen straff de første 10 s)
 
@@ -145,6 +167,12 @@ Reise-modus sorterer automatisk etter størrelse (`bySize`). Kjør `node selftes
 - v6: kjede-popup vises kun ved hver 10. streak + når en lang kjede (≥10) ender
   (beregnes fortsatt hver fjerning) — mindre forstyrrende. Tidsstraffen starter
   først etter 10 sekunder (`TIME_PENALTY_GRACE_SEC`) og er doblet til 2/sek.
+- v7: endeløs reise + level-mekanikker — padding fra level 6, skalert
+  kollisjonsstraff (`crashForLevel`), blinkende farekant (−100 fra level 10,
+  −200 «kun riktig kant» fra level 20) med regel-skjermer, samtidige trykk
+  (ingen busy-lås), figurnavn med æ/ø/å (Måne/Båt), og «Level N klart!» vises.
+  `attemptMove` fikk `opts.reward`-override; konfetti hardnet mot manglende
+  canvas. Egen utviklerlogg: se `DEVLOG.md`.
 
 ## Backlog / ideer til videre arbeid
 - Flere ikoner (mot 100). Behold tydelige silhuetter + farger.
