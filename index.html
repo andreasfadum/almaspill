@@ -763,7 +763,7 @@
         "</b>. Neste level er " + Icons.article(nextIcon) + " <b>" + nextIcon.name + "</b>.</div>" +
       "<div class='hint' style='opacity:.7;margin-bottom:0'>Neste figur:</div>" +
       "<div>" + miniIcon(nextIcon, 12) + "</div>";
-    showOverlay("🎉 Du klarte level " + doneLevel + "!", body,
+    showResumable("🎉 Du klarte level " + doneLevel + "!", body,
       [btn("Neste level →", function () { journeyIndex++; nextJourney(); })]);
   }
 
@@ -772,7 +772,7 @@
     stopTimer();
     var entry = makeEntry();
     recordTotalRun(entry);
-    showOverlay("💔 Du tapte", "<div class='hint'>Du kom til level " + currentLevel() + ".</div>" + recordsHtml(entry),
+    showResumable("💔 Du tapte", "<div class='hint'>Du kom til level " + currentLevel() + ".</div>" + recordsHtml(entry),
       [btn("🔄 Restart", restartJourney)]);
   }
 
@@ -788,7 +788,14 @@
     (buttons || []).forEach(function (b) { overlayBtns.appendChild(b); });
     overlay.classList.add("show");
   }
-  function hideOverlay() { overlay.classList.remove("show"); picker.classList.remove("show"); }
+  // "Blokkerende" skjermer (vinner/tap/regel) lagres som gjenopprettbare, slik at
+  // f.eks. Rekorder-skjermen kan vises oppå og deretter lukkes TILBAKE til dem.
+  var resumeOverlay = null;
+  function showResumable(title, bodyHtml, buttons) {
+    resumeOverlay = function () { showOverlay(title, bodyHtml, buttons); };
+    resumeOverlay();
+  }
+  function hideOverlay() { overlay.classList.remove("show"); picker.classList.remove("show"); resumeOverlay = null; }
   function btn(label, fn) {
     var b = document.createElement("button"); b.textContent = label;
     b.addEventListener("click", fn); return b;
@@ -809,13 +816,13 @@
   function showRule(m) {
     stopDanger();
     if (m === 1) {
-      showOverlay("⚠️ Ny regel fra level 10",
+      showResumable("⚠️ Ny regel fra level 10",
         "<div class='hint' style='line-height:1.5'>Én av kantene <b style='color:#e74c3c'>blinker rødt</b> og bytter side hvert 3. sekund. Et <b style='color:#f5a623'>oransje varsel</b> viser hvor neste kant kommer.<br><br>" +
         "Kjører en strek <b>UT gjennom den blinkende røde kanten</b>, mister du <b>200 poeng</b>!<br><br>" +
         "Se pilretningen — unngå å sende streker mot den røde kanten.</div>",
         [btn("Jeg er klar! →", function () { nextJourney(); })]);
     } else {
-      showOverlay("⚠️ Ny regel fra level 20",
+      showResumable("⚠️ Ny regel fra level 20",
         "<div class='hint' style='line-height:1.5'>Nå snur det! Du må treffe <b style='color:#2ecc71'>BARE den blinkende grønne kanten</b>.<br><br>" +
         "Kjører en strek ut et <b>annet sted</b>, mister du <b>200 poeng</b>!<br><br>" +
         "Vent til riktig kant blinker grønt før du sender streken ut.</div>",
@@ -837,7 +844,11 @@
   // -- Knapper --------------------------------------------------------------
   $("btnRestart").addEventListener("click", restartJourney);
   $("btnScores").addEventListener("click", function () {
-    showOverlay("🏆 Rekorder", recordsHtml(null), [btn("Lukk", hideOverlay)]);
+    // Husk en eventuell blokkerende skjerm (vinner/tap/regel) så «Lukk» går dit.
+    var back = resumeOverlay;
+    showOverlay("🏆 Rekorder", recordsHtml(null), [btn("Lukk", function () {
+      if (back) { resumeOverlay = back; back(); } else hideOverlay();
+    })]);
   });
   var resizeT;
   window.addEventListener("resize", function () {

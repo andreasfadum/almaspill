@@ -13,6 +13,20 @@ fra `main`). Se `CLAUDE.md` for arkitektur og invarianter.
 
 ---
 
+## 2026-06-21 — Bugfix: Rekorder over vinner-skjerm ga tom skjerm
+
+Bug (rapportert med skjermbilde): etter fullført brett → åpne «Rekorder» → «Lukk»
+ga tom skjerm (vinner-skjermens «Neste level»-knapp forsvant), så man måtte
+trykke Restart. Årsak: alle skjermer deler samme overlay-element, og Rekorders
+«Lukk» kalte `hideOverlay()` som skjulte alt.
+
+Fix: «blokkerende» skjermer (vinner/tap/regel) vises nå via `showResumable`, som
+lagrer en gjenopprettings-closure i `resumeOverlay`. Rekorder vises oppå med
+`showOverlay`, og «Lukk» kaller `resumeOverlay()` (tilbake til forrige skjerm)
+hvis den finnes, ellers `hideOverlay()`. `hideOverlay` nullstiller `resumeOverlay`
+(kalles ved hvert nytt brett i `loadLevel`). Verifisert med jsdom: løs level 1 →
+åpne Rekorder → Lukk → vinner-skjerm tilbake → «Neste level» går til level 2.
+
 ## 2026-06-21 — Sterkere streak-belønning (kontinuerlig hurtighet + større kjede)
 
 Ønske: belønn raske streaks mer, så 0,5 s/strek slår 1 s/strek, men hold maks
