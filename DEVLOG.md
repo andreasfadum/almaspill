@@ -13,6 +13,23 @@ fra `main`). Se `CLAUDE.md` for arkitektur og invarianter.
 
 ---
 
+## 2026-06-21 — Sterkere streak-belønning (kontinuerlig hurtighet + større kjede)
+
+Ønske: belønn raske streaks mer, så 0,5 s/strek slår 1 s/strek, men hold maks
+forutsigbart for «X av Y mulige poeng».
+
+- **Kontinuerlig hurtighetsbonus** (`speedBonusFor`): lineær fra `SPEED_MAX` (20,
+  ved 0 ms) til 0 ved `SPEED_WINDOW` (2,5 s). Erstatter de gamle bøttene
+  (<1,2 s=10 …) som gjorde 0,5 s og 1 s like.
+- **Større kjede-bonus**: `min(streak, COMBO_CAP=15) * COMBO_STEP=3` (maks 45 per
+  strek), opp fra `min(streak,6)*2` (maks 12).
+- **`maxScoreForPieces`** oppdatert til `exitReward + SPEED_MAX + min(i,15)*3` —
+  må holdes i synk med `computeExitBonus`.
+- Måling: 15×0,5 s ≈ 754, 15×1 s ≈ 698, 15×2 s ≈ 586; teoretisk maks (gap→0) for
+  15 = 810 = nøyaktig et perfekt løp (predikerbart). Verifisert med node-logikktest
+  + jsdom (vinner-skjerm viser «X av Y mulige poeng», ingen kjøretidsfeil) +
+  `selftest` grønn.
+
 ## 2026-06-20 — Tette figurer, flerfarge, ny vinner-skjerm, rekorder, kun Restart
 
 To batcher samme dag (etter v7):

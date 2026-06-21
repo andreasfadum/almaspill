@@ -201,6 +201,8 @@
   var accumMs = 0, lastTick = 0, timerActive = false, timerId = null, secApplied = 0;
   var TIME_PENALTY_GRACE_SEC = 10;    // ingen tidsstraff de første 10 sekundene
   var COMBO_WINDOW = 2500;            // ms: fjern raskere enn dette for å bygge kjede
+  var SPEED_MAX = 20, SPEED_WINDOW = 2500; // hurtighetsbonus: lineær fra 20 (0 ms) til 0 (2,5 s)
+  var COMBO_STEP = 3, COMBO_CAP = 15;      // kjede-bonus = min(streak,15)*3 (maks 45 per strek)
   var lastExitAccum = 0, combo = 0;   // hurtighetsbonus: belønner raske fjerninger
 
   // -- Rekorder (localStorage med fallback til minne) -----------------------
@@ -298,11 +300,12 @@
   // +grunnstraff per level deretter (level L -> base*(1+L)).
   function crashForLevel(level) { return CONFIG.crashPenalty * (1 + level); }
 
-  // Teoretisk maks poeng et brett kan gi: alle streker fjernet i én rask kjede
-  // (full hurtighetsbonus + kjede), uten krasj, tidsstraff eller farekant-straff.
+  // Teoretisk maks poeng et brett kan gi: alle streker fjernet i én lynrask kjede
+  // (full hurtighetsbonus + maksimal kjede-bonus), uten krasj, tidsstraff eller
+  // farekant-straff. Må holdes i synk med computeExitBonus for forutsigbar maks.
   function maxScoreForPieces(n) {
     var total = 0;
-    for (var i = 1; i <= n; i++) total += CONFIG.exitReward + 10 + Math.min(i, 6) * 2;
+    for (var i = 1; i <= n; i++) total += CONFIG.exitReward + SPEED_MAX + Math.min(i, COMBO_CAP) * COMBO_STEP;
     return total;
   }
 
@@ -648,14 +651,20 @@
   // Kjeden BEREGNES hver gang, men vises sjelden (se finish/krasj): kun ved hver
   // 10. streak og når en lang kjede tar slutt — så den ikke forstyrrer flowen.
   // `ended` = lengden på en kjede som nettopp ble brutt (0 hvis ingen).
+  // Hurtighetsbonus er KONTINUERLIG: jo nærmere 0 sek, jo større (0,5 s slår 1 s).
+  function speedBonusFor(gap) {
+    var f = 1 - gap / SPEED_WINDOW;
+    if (f < 0) f = 0;
+    return Math.round(SPEED_MAX * f);
+  }
   function computeExitBonus() {
     var gap = accumMs - lastExitAccum;
     lastExitAccum = accumMs;
     var ended = 0;
     if (gap < COMBO_WINDOW) combo++;        // fortsett kjeden
     else { ended = combo; combo = 0; }      // for sen: kjeden brytes
-    var speed = gap < 1200 ? 10 : gap < 2500 ? 5 : gap < 4000 ? 2 : 0;
-    var comboBonus = Math.min(combo, 6) * 2; // opptil +12 for lange kjeder
+    var speed = speedBonusFor(gap);                       // 0–20, faller med tid
+    var comboBonus = Math.min(combo, COMBO_CAP) * COMBO_STEP; // 0–45, vokser med streak
     return { speed: speed, comboBonus: comboBonus, total: speed + comboBonus, combo: combo, ended: ended, gap: gap };
   }
   var COMBO_SHOW_EVERY = 10;                  // vis kjede-popup ved hver 10. streak

@@ -136,12 +136,18 @@ I `engine.js`, `DEFAULT_CONFIG`:
 
 Hurtighetsbonus (i `index.html`, `computeExitBonus`): rask fjerning gir ekstra
 poeng på toppen av `exitReward`, og raske fjerninger på rad bygger en **kjede**
-(combo) som gir enda mer. `COMBO_WINDOW` (2500 ms) styrer hvor raskt neste
-fjerning må komme for å holde kjeden i live. Bonusen sendes inn til
-`Engine.attemptMove(state, id, { bonus })`. Kjeden beregnes hver fjerning, men
-popup-en vises sjelden for ikke å forstyrre flowen: kun ved hver
-`COMBO_SHOW_EVERY` (10.) streak, og når en lang kjede (≥ `COMBO_END_MIN`)
-tar slutt.
+(combo) som gir enda mer. Bonusen sendes inn til
+`Engine.attemptMove(state, id, { bonus })`.
+- **Hurtighet** er KONTINUERLIG: `speedBonusFor(gap)` = lineær fra `SPEED_MAX`
+  (20, ved 0 ms) til 0 ved `SPEED_WINDOW` (2500 ms). Så 0,5 s gir mer enn 1 s.
+- **Kjede** = `min(streak, COMBO_CAP) * COMBO_STEP` (= `min(streak,15)*3`, maks 45
+  per strek) — vokser med streak-lengden for å belønne å løse mange raskt.
+- **Forutsigbar maks**: maks per strek = `exitReward + SPEED_MAX + min(i,15)*3`,
+  og `maxScoreForPieces(n)` summerer dette — MÅ holdes i synk med `computeExitBonus`
+  så vinner-skjermens «X av Y mulige poeng» stemmer.
+- `COMBO_WINDOW` (2500 ms) styrer hvor raskt neste fjerning må komme for å holde
+  kjeden i live. Popup-en vises sjelden: kun ved hver `COMBO_SHOW_EVERY` (10.)
+  streak, og når en lang kjede (≥ `COMBO_END_MIN`) tar slutt.
 
 I `index.html`:
 - `difficultyForIndex(i)` — vanskelighetsrampe for reise-modus (level 1 enkel).
@@ -192,6 +198,10 @@ Reise-modus sorterer automatisk etter størrelse (`bySize`). Kjør `node selftes
   blinker 5 s / rød 3 s. Ny vinner-skjerm (poeng vs. teoretisk maks + forrige/
   neste figur), forenklede knapper (kun Restart + Rekorder, fri modus fjernet),
   og utvidede rekorder (raskest level, flest poeng/level, høyeste level, total).
+- v9: sterkere streak-belønning. Hurtighetsbonus er nå KONTINUERLIG
+  (`speedBonusFor`, 20→0 over 2,5 s) så 0,5 s slår 1 s, og kjede-bonusen vokser
+  mer per streak (`min(streak,15)*3`, maks 45/strek). `maxScoreForPieces` holdt i
+  synk så «X av Y mulige poeng» forblir forutsigbart.
 
 ## Backlog / ideer til videre arbeid
 - Flere ikoner (mot 100). Behold tydelige silhuetter + farger.
