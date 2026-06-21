@@ -13,6 +13,38 @@ fra `main`). Se `CLAUDE.md` for arkitektur og invarianter.
 
 ---
 
+## 2026-06-21 — Rekord-kategorier, level 30+-regime, og «Mine figurer» (tegneverktøy)
+
+Tre ønsker (plan godkjent):
+
+1. **Rekorder per level-kategori**: «raskest løste brett» deles i 6 spenn (1–4,
+   5–9, 10–19, 20–29, 30–50, 51+). `LEVEL_RANGES`/`rangeForLevel`; rekord-objektet
+   bruker `fastestByRange` (key→{sec,level,icon}) i stedet for ett `fastestLevel`.
+   `recordLevelStats`/`recordsHtml` oppdatert. Beholder Høyeste level, Flest poeng
+   på ett level, og topp-10 totalscore.
+2. **Level 30+-regime**: `dangerModeForLevel` gir 0 fra level 30 (ingen kant).
+   Tidsstraff 10× via `timePenaltyForLevel` (20/sek) lagret i `currentTimePenalty`
+   og brukt i `tick()`. Vanskeligere geometri: `loadLevel` sender `scale:2` +
+   `specialChance:0.3` til generatoren fra level 30. Ny `scaleCells` i
+   `generator.js` (blåser opp figuren k×, beholder 1 margin). Regel-skjerm
+   `showRule(3)` ved level 30.
+3. **Mine figurer + tegneverktøy**: ny knapp «🎨 Mine figurer» → liste + «Lag
+   figur». Editor: faste størrelser (6/8/10/12), malingsspann-palett (12 ferdige
+   farger + egne lagrede via `<input type=color>`), viskelær, fyll én rute av
+   gangen, lagre. Permanent lagring i localStorage (`alma_custom_figures`,
+   `alma_custom_colors`). Egne figurer **mikses inn i reisen** via
+   `buildJourneyIcons` (kalt i `startRun`, sortert på størrelse). Datakompat:
+   `iconToCells` aksepterer nå `icon.cells` (egendefinert) i tillegg til `grid`.
+   Mine figurer/Rekorder bruker `resumeOverlay` så «Lukk» går tilbake til en
+   eventuell vinner/tap/regel-skjerm (samme fix som rekord-bugen).
+
+**Verifisert:** `node selftest.js` = 47 sjekker grønne (nye: `scale`-løsbarhet +
+egendefinert figur løsbar/farget). jsdom-røyktest: rekorder viser 6 kategorier;
+reise til level 30 → farekant 10–29, regel-skjerm 30, INGEN kant fra 30; editor
+lagrer egen farge + figur (fyll/viske, riktig størrelse) og Restart mikser den
+inn i reisen uten feil. (jsdom har ikke localStorage for file://-origin — spillet
+faller trygt tilbake via try/catch; testet med polyfill.)
+
 ## 2026-06-21 — Bugfix: Rekorder over vinner-skjerm ga tom skjerm
 
 Bug (rapportert med skjermbilde): etter fullført brett → åpne «Rekorder» → «Lukk»

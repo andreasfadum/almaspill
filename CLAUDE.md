@@ -39,9 +39,18 @@ tjent på brettet vs. teoretisk maks (`maxScoreForPieces`), «Level X var en/et
 
 ### Rekorder
 `btnScores` / tap-skjerm viser (localStorage `alma_labyrint_records_v2`):
-høyeste level, raskest løst level, flest poeng på ett level, og topp-10 beste
-totalscore. `recordLevelStats` (per løste level), `recordTotalRun` (per tapt
-runde), `recordsHtml` (visning).
+høyeste level, flest poeng på ett level, **raskest løste brett per level-kategori**
+(1–4, 5–9, 10–19, 20–29, 30–50, 51+ — se `LEVEL_RANGES`/`rangeForLevel`, lagret i
+`fastestByRange`), og topp-10 beste totalscore. `recordLevelStats` (per løste
+level), `recordTotalRun` (per tapt runde), `recordsHtml` (visning).
+
+### Mine figurer (tegneverktøy)
+Knappen «🎨 Mine figurer» åpner en liste + «Lag figur» (editor: faste
+rutenett-størrelser, malingsspann-palett med ferdige + egne lagrede farger,
+viskelær, fyll én rute av gangen, lagre). Lagres permanent i localStorage
+(`alma_custom_figures`, `alma_custom_colors`). Egne figurer **mikses inn i reisen**
+via `buildJourneyIcons()` (kalt i `startRun`). Datakompat: `Icons.iconToCells`
+godtar `icon.cells` `[{r,c,color}]` (egendefinert) i tillegg til `icon.grid`.
 
 ### Level-mekanikker
 - **Skalert kollisjonsstraff**: krasj mot annen strek koster mer per level — 2×
@@ -56,6 +65,10 @@ runde), `recordsHtml` (visning).
   andre kanter → **−200**. Regelen vises på egen skjerm før level 10 og 20
   (`showRule`). Logikk: `dangerMode`/`dangerEdge`/`edgePenaltyFor`; straffen
   påføres via `Engine.attemptMove(state, id, { reward: -penalty })`.
+- **Level 30+**: INGEN blinkende kant (`dangerModeForLevel` → 0), men brettene er
+  større/tettere (`Generator.generate({ scale: 2 })` via `scaleCells`) og mer
+  komplekse (`specialChance` 0.3), og tidsstraffen er 10× (`timePenaltyForLevel`
+  → 20/sek, brukt som `currentTimePenalty` i `tick`). Regel-skjerm `showRule(3)`.
 - **Samtidige trykk**: ingen global lås — et trekk avgjøres logisk med én gang,
   slange-animasjonen er rent kosmetisk, og poeng-popups (`pointer-events:none`)
   hindrer aldri at man trykker. Krasj har kun en kort per-strek nedkjøling
@@ -202,6 +215,13 @@ Reise-modus sorterer automatisk etter størrelse (`bySize`). Kjør `node selftes
   (`speedBonusFor`, 20→0 over 2,5 s) så 0,5 s slår 1 s, og kjede-bonusen vokser
   mer per streak (`min(streak,15)*3`, maks 45/strek). `maxScoreForPieces` holdt i
   synk så «X av Y mulige poeng» forblir forutsigbart.
+- v9b: bugfix — Rekorder oppå vinner/tap/regel-skjerm ga tom skjerm. Disse vises
+  nå via `showResumable`/`resumeOverlay`; «Lukk» går tilbake.
+- v10: rekorder «raskest løste brett» per level-kategori (1–4…51+,
+  `fastestByRange`). Level 30+: ingen blinkende kant, men større/tettere
+  (`scale`) og mer komplekse brett + 10× tidsstraff, med regel-skjerm. Nytt
+  tegneverktøy «Mine figurer» (lag/lagre egne figurer, egne farger) som mikses
+  inn i reisen (`buildJourneyIcons`); `iconToCells` godtar `icon.cells`.
 
 ## Backlog / ideer til videre arbeid
 - Flere ikoner (mot 100). Behold tydelige silhuetter + farger.

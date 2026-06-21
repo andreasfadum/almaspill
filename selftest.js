@@ -213,6 +213,38 @@ multi.forEach(function (icon) {
 check("flerfarge: faktisk flere farger i ikon", multiColorSeen === multi.length, multiColorSeen + "/" + multi.length);
 check("flerfarge: brett losbare + farget", colorFails === 0, "feil=" + colorFails);
 
+// Scale (level 30+): oppskalert figur skal bli k× større og fortsatt løsbart.
+var scaleFails = 0;
+Icons.ICONS.slice(0, 4).forEach(function (icon) {
+  var base = Icons.iconToCells(icon);
+  for (var s = 1; s <= 8; s++) {
+    var lvl = Generator.generate(icon, { seed: s, difficulty: 0.6, scale: 2, specialChance: 0.3 });
+    if (lvl.rows !== (base.rows - 2) * 2 + 2 || lvl.cols !== (base.cols - 2) * 2 + 2) scaleFails++;
+    if (!lvl.meta.metrics.solvable) scaleFails++;
+  }
+});
+check("scale: 2x storre brett + losbart", scaleFails === 0, "feil=" + scaleFails);
+
+// Egendefinert figur (cells med farge) skal kunne genereres og være løsbar.
+var customFails = 0;
+var customIcon = {
+  name: "Egen", cells: [
+    { r: 2, c: 2, color: "#e74c3c" }, { r: 2, c: 3, color: "#e74c3c" }, { r: 2, c: 4, color: "#e74c3c" },
+    { r: 3, c: 3, color: "#2ecc71" }, { r: 4, c: 3, color: "#2ecc71" },
+    { r: 5, c: 2, color: "#6c5ce7" }, { r: 5, c: 3, color: "#6c5ce7" }, { r: 5, c: 4, color: "#6c5ce7" },
+  ],
+};
+var cic = Icons.iconToCells(customIcon);
+check("egen figur: beskaaret til 1 margin", cic.cells.some(function (x) { return x.r === 1; }) && cic.rows >= 3, "rows=" + cic.rows);
+check("egen figur: cellCount stemmer", Icons.cellCount(customIcon) === 8, "" + Icons.cellCount(customIcon));
+for (var cs = 1; cs <= 10; cs++) {
+  var clvl = Generator.generate(customIcon, { seed: cs, difficulty: 0.5 });
+  if (!clvl.meta.metrics.solvable) customFails++;
+  // hver strek skal ha en av de tre fargene
+  clvl.pieces.forEach(function (p) { if (["#e74c3c", "#2ecc71", "#6c5ce7"].indexOf(p.color) < 0) customFails++; });
+}
+check("egen figur: losbar + farger bevart", customFails === 0, "feil=" + customFails);
+
 // ---------------------------------------------------------------------------
 // Rapport
 // ---------------------------------------------------------------------------

@@ -251,17 +251,36 @@
     return !allR && !allC; // ikke ren rett linje => har hjørne
   }
 
+  // Blås opp en figur k× (hver celle -> k×k blokk), behold farger, og behold
+  // nøyaktig 1 celle margin rundt. Gir større/tettere brett (brukt fra level 30).
+  function scaleCells(iconCells, k) {
+    var cells = [];
+    iconCells.cells.forEach(function (c) {
+      var r0 = (c.r - 1) * k + 1, c0 = (c.c - 1) * k + 1; // -1: fjern gammel margin før skalering
+      for (var dr = 0; dr < k; dr++) for (var dc = 0; dc < k; dc++) {
+        cells.push({ r: r0 + dr, c: c0 + dc, color: c.color });
+      }
+    });
+    return {
+      cells: cells, name: iconCells.name, color: iconCells.color,
+      rows: (iconCells.rows - 2) * k + 2, cols: (iconCells.cols - 2) * k + 2,
+    };
+  }
+
   /*
    * Hovedinngang: lag et brett fra et ikon.
-   *   opts: { seed, difficulty (0..1), maxArm, cornerChance, specialChance }
+   *   opts: { seed, difficulty (0..1), maxArm, cornerChance, specialChance, scale }
    * Figuren er allerede beskåret til nøyaktig 1 celle margin av iconToCells, så
    * brettet er like stort som figuren + margin (figuren fyller plassen).
+   * `scale` (>1) blåser opp figuren for større/tettere brett.
    */
   function generate(icon, opts) {
     opts = opts || {};
     var seed = opts.seed == null ? Math.floor(Math.random() * 1e9) : opts.seed;
     var difficulty = opts.difficulty == null ? 0.5 : opts.difficulty;
+    var scale = opts.scale && opts.scale > 1 ? Math.floor(opts.scale) : 1;
     var iconCells = Icons.iconToCells(icon);
+    if (scale > 1) iconCells = scaleCells(iconCells, scale);
     var rows = iconCells.rows, cols = iconCells.cols;
     var rng = makeRng(seed);
 

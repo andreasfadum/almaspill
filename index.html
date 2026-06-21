@@ -126,6 +126,15 @@
   @keyframes edgeBlink { 0%,100%{opacity:0.95;} 50%{opacity:0.18;} }
   .danger-preview { animation: edgePreview .25s ease-in-out infinite alternate; }
   @keyframes edgePreview { from{opacity:0.4;} to{opacity:0.85;} }
+  /* Tegneverktøy (Mine figurer) */
+  .draw-grid { display: grid; gap: 2px; background: var(--grid); padding: 2px; border-radius: 10px; margin: 8px auto; touch-action: manipulation; }
+  .draw-cell { background: #fff; border-radius: 3px; cursor: pointer; }
+  .active-color { display: inline-block; width: 14px; height: 14px; border-radius: 4px; margin-left: 6px; vertical-align: middle; border: 1px solid rgba(0,0,0,0.25); }
+  .palette-pop { background: #fff; border-radius: 16px; padding: 12px; box-shadow: 0 8px 24px rgba(0,0,0,0.25); margin: 8px auto; max-width: 320px; }
+  .swatches { display: grid; grid-template-columns: repeat(6, 1fr); gap: 8px; margin: 8px 0; }
+  .swatch { width: 36px; height: 36px; border-radius: 8px; border: 2px solid rgba(0,0,0,0.15); cursor: pointer; padding: 0; box-shadow: none; }
+  .swatch:active { transform: translateY(1px); }
+  input[type="color"] { width: 44px; height: 36px; border: none; background: none; padding: 0; cursor: pointer; }
   #boardWrap.flash { animation: boardFlash .45s ease-out; }
   @keyframes boardFlash {
     0%   { box-shadow: 0 0 0 0 rgba(231,76,60,0); }
@@ -148,6 +157,7 @@
 
   <div class="toolbar">
     <button id="btnRestart">🔄 Restart</button>
+    <button id="btnMyFigs" class="secondary">🎨 Mine figurer</button>
     <button id="btnScores" class="secondary">🏆 Rekorder</button>
   </div>
 
@@ -161,6 +171,8 @@
       <div id="overlayBtns"></div>
     </div>
     <div id="picker" class="overlay"></div>
+    <div id="myfigs" class="overlay"></div>
+    <div id="editor" class="overlay"></div>
   </div>
 </div>
 
@@ -194,10 +206,11 @@
   var DANGER_PREVIEW_MS = 500;         // oransje forvarsel vises 0,5 s før byttet
   var EDGE_AVOID_PENALTY = 200;        // level 10–19: straff for å treffe blinkende kant
   var EDGE_REQUIRE_PENALTY = 200;      // level 20+: straff for å treffe FEIL kant
-  var DANGER_LEVEL_AVOID = 10, DANGER_LEVEL_REQUIRE = 20;
+  var DANGER_LEVEL_AVOID = 10, DANGER_LEVEL_REQUIRE = 20, DANGER_LEVEL_HARD = 30;
   var dangerMode = 0, dangerEdge = null, dangerPreviewEdge = null;
   var dangerPreviewTimer = null, dangerSwitchTimer = null;
-  var rulesShown = { avoid: false, require: false }; // regel-skjerm vises én gang per runde
+  var rulesShown = { avoid: false, require: false, hard: false }; // regel-skjerm vises én gang per runde
+  var currentTimePenalty = CONFIG.timePenaltyPerSec; // poengtap/sek for gjeldende level (10× fra level 30)
   var accumMs = 0, lastTick = 0, timerActive = false, timerId = null, secApplied = 0;
   var TIME_PENALTY_GRACE_SEC = 10;    // ingen tidsstraff de første 10 sekundene
   var COMBO_WINDOW = 2500;            // ms: fjern raskere enn dette for å bygge kjede
@@ -209,7 +222,22 @@
   // Flere kategorier: beste totalscore (topp 10), raskest løst level, flest
   // poeng på ett level, og høyeste level nådd.
   var memR = null;
-  function emptyRecords() { return { totals: [], fastestLevel: null, mostLevelPoints: null, highestLevel: 0 }; }
+  // Level-kategorier for "raskest løste level".
+  var LEVEL_RANGES = [
+    { key: "1-4", label: "1–4", lo: 1, hi: 4 },
+    { key: "5-9", label: "5–9", lo: 5, hi: 9 },
+    { key: "10-19", label: "10–19", lo: 10, hi: 19 },
+    { key: "20-29", label: "20–29", lo: 20, hi: 29 },
+    { key: "30-50", label: "30–50", lo: 30, hi: 50 },
+    { key: "51+", label: "51+", lo: 51, hi: Infinity },
+  ];
+  function rangeForLevel(level) {
+    for (var i = 0; i < LEVEL_RANGES.length; i++) {
+      if (level >= LEVEL_RANGES[i].lo && level <= LEVEL_RANGES[i].hi) return LEVEL_RANGES[i];
+    }
+    return LEVEL_RANGES[LEVEL_RANGES.length - 1];
+  }
+  function emptyRecords() { return { totals: [], fastestByRange: {}, mostLevelPoints: null, highestLevel: 0 }; }
   function loadRecords() {
     try { return JSON.parse(localStorage.getItem(RKEY)) || emptyRecords(); }
     catch (e) { return memR || emptyRecords(); }
@@ -221,7 +249,12 @@
   // Oppdater rekorder når et level er LØST.
   function recordLevelStats(level, icon, gain, sec) {
     var R = loadRecords();
-    if (sec > 0 && (!R.fastestLevel || sec < R.fastestLevel.sec)) R.fastestLevel = { sec: sec, level: level, icon: icon };
+    if (!R.fastestByRange) R.fastestByRange = {};
+    if (sec > 0) {
+      var key = rangeForLevel(level).key;
+      var cur = R.fastestByRange[key];
+      if (!cur || sec < cur.sec) R.fastestByRange[key] = { sec: sec, level: level, icon: icon };
+    }
     if (!R.mostLevelPoints || gain > R.mostLevelPoints.points) R.mostLevelPoints = { points: gain, level: level, icon: icon };
     if (level > (R.highestLevel || 0)) R.highestLevel = level;
     saveRecords(R);
@@ -239,12 +272,17 @@
   // Bygg HTML for rekord-skjermen (me = denne rundens totalscore, kan være null).
   function recordsHtml(me) {
     var R = loadRecords();
-    var fl = R.fastestLevel, mp = R.mostLevelPoints;
+    var mp = R.mostLevelPoints, fbr = R.fastestByRange || {};
     var html = "<table class='hs'>" +
       "<tr><td>🚀 Høyeste level</td><td>" + (R.highestLevel || 0) + "</td></tr>" +
-      "<tr><td>⚡ Raskest løst level</td><td>" + (fl ? (fl.sec.toFixed(1) + " s · L" + fl.level + " " + fl.icon) : "–") + "</td></tr>" +
       "<tr><td>⭐ Flest poeng på ett level</td><td>" + (mp ? (mp.points + " · L" + mp.level + " " + mp.icon) : "–") + "</td></tr>" +
       "</table>";
+    html += "<div class='hint'>⚡ Raskest løste brett:</div><table class='hs'>";
+    LEVEL_RANGES.forEach(function (rg) {
+      var f = fbr[rg.key];
+      html += "<tr><td>Level " + rg.label + "</td><td>" + (f ? (f.sec.toFixed(1) + " s · L" + f.level + " " + f.icon) : "–") + "</td></tr>";
+    });
+    html += "</table>";
     if (R.totals && R.totals.length) {
       html += "<div class='hint'>Beste totalscore:</div><table class='hs'>" +
         "<tr><th></th><th>Poeng</th><th>Tid</th><th>Levels</th></tr>";
@@ -269,7 +307,7 @@
     timeEl.textContent = fmtTime(0);
   }
   function stopTimer() { timerActive = false; }
-  function overlayShown() { return overlay.classList.contains("show") || picker.classList.contains("show"); }
+  function overlayShown() { return boardWrap.querySelector(".overlay.show") !== null; }
   function elapsedSec() { return Math.floor(accumMs / 1000); }
   function fmtTime(s) { var m = Math.floor(s / 60); return m + ":" + ("0" + (s % 60)).slice(-2); }
   function tick() {
@@ -280,8 +318,8 @@
     // Trekk poeng for hvert hele sekund som har gått — men først ETTER fristen.
     while (secApplied < secs) {
       secApplied++;
-      if (state && CONFIG.timePenaltyPerSec && secApplied > TIME_PENALTY_GRACE_SEC) {
-        state.score -= CONFIG.timePenaltyPerSec;
+      if (state && currentTimePenalty && secApplied > TIME_PENALTY_GRACE_SEC) {
+        state.score -= currentTimePenalty;
         if (state.score < 0) state.score = 0;
       }
     }
@@ -309,31 +347,43 @@
     return total;
   }
 
-  // Faremodus ut fra level: blinkende kant fra level 10, "kun riktig kant" fra 20.
+  // Faremodus ut fra level: blinkende kant fra level 10, "kun riktig kant" fra 20,
+  // og INGEN kant igjen fra level 30 (da er det heller større/vanskeligere brett).
   function dangerModeForLevel(level) {
     if (mode !== "journey") return 0;
+    if (level >= DANGER_LEVEL_HARD) return 0;
     if (level >= DANGER_LEVEL_REQUIRE) return 2;
     if (level >= DANGER_LEVEL_AVOID) return 1;
     return 0;
   }
 
+  // Tidsstraff per sekund: 10× fra level 30.
+  function timePenaltyForLevel(level) {
+    return CONFIG.timePenaltyPerSec * (level >= DANGER_LEVEL_HARD ? 10 : 1);
+  }
+
   function startRun(newMode) {
     mode = newMode;
     runningScore = CONFIG.startScore; peakScore = CONFIG.startScore; levelsCompleted = 0;
-    rulesShown = { avoid: false, require: false };
+    rulesShown = { avoid: false, require: false, hard: false };
+    journeyIcons = buildJourneyIcons(); // ta med nylig lagrede egne figurer
     stopDanger();
     startTimer();
   }
 
   function loadLevel(icon, difficulty, seed) {
     currentIcon = icon; currentDiff = difficulty;
-    var level = Generator.generate(icon, {
+    var level = currentLevel();
+    currentTimePenalty = timePenaltyForLevel(level);
+    var lvl = Generator.generate(icon, {
       seed: seed == null ? Math.floor(Math.random() * 1e9) : seed,
       difficulty: difficulty,
+      scale: level >= DANGER_LEVEL_HARD ? 2 : 1,            // større/tettere fra level 30
+      specialChance: level >= DANGER_LEVEL_HARD ? 0.3 : undefined, // flere fler-vinkel-streker
     });
-    state = Engine.createBoard(level, {
+    state = Engine.createBoard(lvl, {
       startScore: runningScore,
-      crashPenalty: crashForLevel(currentLevel()),
+      crashPenalty: crashForLevel(level),
     });
     boardStartScore = state.score;      // for poeng-oppsummering når brettet er løst
     boardStartAccumMs = accumMs;
@@ -342,7 +392,7 @@
     crashCooldown = {};
     lastExitAccum = accumMs; combo = 0; // hurtighetsbonus starter på nytt per brett
     configureDanger();                  // start/stopp blinkende farekant for dette levelet
-    fitCell(level); render();
+    fitCell(lvl); render();
     statusEl.textContent = "Figur: " + icon.name + "  ·  " + Object.keys(state.pieces).length + " streker igjen";
     hideOverlay();
   }
@@ -809,6 +859,7 @@
     var level = journeyIndex + 1;
     if (level === DANGER_LEVEL_AVOID && !rulesShown.avoid) { rulesShown.avoid = true; return showRule(1); }
     if (level === DANGER_LEVEL_REQUIRE && !rulesShown.require) { rulesShown.require = true; return showRule(2); }
+    if (level === DANGER_LEVEL_HARD && !rulesShown.hard) { rulesShown.hard = true; return showRule(3); }
     var icon = journeyIcons[journeyIndex % journeyIcons.length];
     loadLevel(icon, difficultyForIndex(journeyIndex));
   }
@@ -821,11 +872,16 @@
         "Kjører en strek <b>UT gjennom den blinkende røde kanten</b>, mister du <b>200 poeng</b>!<br><br>" +
         "Se pilretningen — unngå å sende streker mot den røde kanten.</div>",
         [btn("Jeg er klar! →", function () { nextJourney(); })]);
-    } else {
+    } else if (m === 2) {
       showResumable("⚠️ Ny regel fra level 20",
         "<div class='hint' style='line-height:1.5'>Nå snur det! Du må treffe <b style='color:#2ecc71'>BARE den blinkende grønne kanten</b>.<br><br>" +
         "Kjører en strek ut et <b>annet sted</b>, mister du <b>200 poeng</b>!<br><br>" +
         "Vent til riktig kant blinker grønt før du sender streken ut.</div>",
+        [btn("Jeg er klar! →", function () { nextJourney(); })]);
+    } else {
+      showResumable("🔥 Ny regel fra level 30",
+        "<div class='hint' style='line-height:1.5'>Ingen blinkende kant lenger — men nå blir brettene <b>større og vanskeligere</b> å løse!<br><br>" +
+        "Og pass på: tiden koster nå <b>10× så mye</b> (20 poeng i sekundet). Vær lynrask!</div>",
         [btn("Jeg er klar! →", function () { nextJourney(); })]);
     }
   }
@@ -841,8 +897,148 @@
     return '<svg width="' + w + '" height="' + h + '">' + rects + "</svg>";
   }
 
+  // -- Mine figurer (egne figurer + tegneverktøy) ---------------------------
+  var FIG_KEY = "alma_custom_figures", COL_KEY = "alma_custom_colors";
+  function loadFigures() { try { return JSON.parse(localStorage.getItem(FIG_KEY)) || []; } catch (e) { return []; } }
+  function saveFigures(list) { try { localStorage.setItem(FIG_KEY, JSON.stringify(list)); } catch (e) {} }
+  function addFigure(fig) { var l = loadFigures(); l.push(fig); saveFigures(l); }
+  function deleteFigure(id) { saveFigures(loadFigures().filter(function (f) { return f.id !== id; })); }
+  function loadColors() { try { return JSON.parse(localStorage.getItem(COL_KEY)) || []; } catch (e) { return []; } }
+  function saveColors(list) { try { localStorage.setItem(COL_KEY, JSON.stringify(list)); } catch (e) {} }
+
+  // Reisens figurer = innebygde + egne, sortert på størrelse (egne mikses inn).
+  function buildJourneyIcons() {
+    return Icons.ICONS.concat(loadFigures()).sort(function (a, b) { return Icons.cellCount(a) - Icons.cellCount(b); });
+  }
+
+  function hideAllOverlays() {
+    overlay.classList.remove("show"); picker.classList.remove("show");
+    $("myfigs").classList.remove("show"); $("editor").classList.remove("show");
+  }
+
+  function openMyFigures() {
+    var back = resumeOverlay; // hvis en blokkerende skjerm var oppe, gå tilbake dit ved Lukk
+    var box = $("myfigs");
+    box.innerHTML = "";
+    var h = document.createElement("h2"); h.textContent = "🎨 Mine figurer"; box.appendChild(h);
+    var create = btn("➕ Lag figur", function () { openEditor(); });
+    create.style.fontSize = "18px"; box.appendChild(create);
+    var figs = loadFigures();
+    if (!figs.length) {
+      var p = document.createElement("div"); p.className = "hint";
+      p.textContent = "Ingen egne figurer ennå. Trykk «Lag figur» for å tegne en!"; box.appendChild(p);
+    } else {
+      var info = document.createElement("div"); info.className = "hint";
+      info.textContent = "Egne figurer dukker opp i reisen (etter Restart)."; box.appendChild(info);
+      var grid = document.createElement("div"); grid.className = "picker";
+      figs.forEach(function (f) {
+        var item = document.createElement("div"); item.className = "icon-btn";
+        item.innerHTML = miniIcon(f, 6) + "<div>" + f.name + "</div>";
+        var del = document.createElement("button"); del.textContent = "🗑 Slett"; del.className = "secondary";
+        del.style.marginTop = "4px"; del.style.padding = "4px 8px"; del.style.fontSize = "12px";
+        del.addEventListener("click", function () {
+          if (window.confirm("Slette \"" + f.name + "\"?")) { deleteFigure(f.id); openMyFigures(); }
+        });
+        item.appendChild(del);
+        grid.appendChild(item);
+      });
+      box.appendChild(grid);
+    }
+    var close = btn("Lukk", function () { box.classList.remove("show"); if (back) { resumeOverlay = back; back(); } });
+    close.className = "secondary"; box.appendChild(close);
+    hideAllOverlays(); box.classList.add("show");
+  }
+
+  // Tegneverktøyet
+  var PRESET_COLORS = ["#e74c3c", "#ef6c3a", "#f5a623", "#f2b705", "#2ecc71", "#3aa657", "#36b1c9", "#2c8fc9", "#6c5ce7", "#a9744f", "#2b2b3a", "#ffffff"];
+  var EDIT = null;
+  function openEditor() {
+    EDIT = { cols: 8, rows: 8, color: "#e74c3c", erase: false, cells: {} };
+    renderEditor();
+    hideAllOverlays(); $("editor").classList.add("show");
+  }
+  function renderEditor() {
+    var box = $("editor"); box.innerHTML = "";
+    var h = document.createElement("h2"); h.textContent = "✏️ Lag figur"; box.appendChild(h);
+
+    var sizes = document.createElement("div"); sizes.className = "toolbar"; sizes.style.justifyContent = "center";
+    [6, 8, 10, 12].forEach(function (n) {
+      var b = btn(n + "×" + n, function () {
+        if (Object.keys(EDIT.cells).length && !window.confirm("Bytte størrelse tømmer tegningen. Fortsette?")) return;
+        EDIT.cols = n; EDIT.rows = n; EDIT.cells = {}; renderEditor();
+      });
+      if (n !== EDIT.cols) b.className = "secondary"; else b.style.outline = "3px solid var(--ink)";
+      sizes.appendChild(b);
+    });
+    box.appendChild(sizes);
+
+    var tools = document.createElement("div"); tools.className = "toolbar"; tools.style.justifyContent = "center";
+    var bucket = btn("🪣 Farge", openPalette);
+    var sw = document.createElement("span"); sw.className = "active-color"; sw.style.background = EDIT.color; bucket.appendChild(sw);
+    var eraser = btn("🧽 Viske", function () { EDIT.erase = !EDIT.erase; renderEditor(); });
+    if (!EDIT.erase) eraser.className = "secondary"; else eraser.style.outline = "3px solid var(--ink)";
+    var save = btn("💾 Lagre", saveFigure);
+    var cancel = btn("✖️ Lukk", function () { openMyFigures(); }); cancel.className = "secondary";
+    tools.appendChild(bucket); tools.appendChild(eraser); tools.appendChild(save); tools.appendChild(cancel);
+    box.appendChild(tools);
+
+    var grid = document.createElement("div"); grid.className = "draw-grid";
+    grid.style.gridTemplateColumns = "repeat(" + EDIT.cols + ", 1fr)";
+    var size = Math.max(16, Math.min(34, Math.floor(300 / EDIT.cols)));
+    for (var r = 0; r < EDIT.rows; r++) {
+      for (var c = 0; c < EDIT.cols; c++) {
+        var cell = document.createElement("div"); cell.className = "draw-cell";
+        cell.style.width = size + "px"; cell.style.height = size + "px";
+        var key = r + "," + c;
+        if (EDIT.cells[key]) cell.style.background = EDIT.cells[key];
+        (function (key, cell) {
+          cell.addEventListener("click", function () {
+            if (EDIT.erase) { delete EDIT.cells[key]; cell.style.background = ""; }
+            else { EDIT.cells[key] = EDIT.color; cell.style.background = EDIT.color; }
+          });
+        })(key, cell);
+        grid.appendChild(cell);
+      }
+    }
+    box.appendChild(grid);
+  }
+  function openPalette() {
+    var box = $("editor");
+    var pop = document.createElement("div"); pop.className = "palette-pop";
+    var t = document.createElement("div"); t.className = "hint"; t.textContent = "Velg farge"; pop.appendChild(t);
+    var grid = document.createElement("div"); grid.className = "swatches";
+    PRESET_COLORS.concat(loadColors()).forEach(function (col) {
+      var s = document.createElement("button"); s.className = "swatch"; s.style.background = col;
+      s.addEventListener("click", function () { EDIT.color = col; EDIT.erase = false; renderEditor(); });
+      grid.appendChild(s);
+    });
+    pop.appendChild(grid);
+    var row = document.createElement("div"); row.className = "toolbar"; row.style.justifyContent = "center";
+    var inp = document.createElement("input"); inp.type = "color"; inp.value = EDIT.color;
+    var use = btn("Bruk", function () { EDIT.color = inp.value; EDIT.erase = false; renderEditor(); }); use.className = "secondary";
+    var saveCol = btn("Lagre farge", function () {
+      var v = inp.value, l = loadColors(); if (l.indexOf(v) < 0) { l.push(v); saveColors(l); }
+      EDIT.color = v; EDIT.erase = false; renderEditor();
+    });
+    var x = btn("✖️", function () { renderEditor(); }); x.className = "secondary";
+    row.appendChild(inp); row.appendChild(use); row.appendChild(saveCol); row.appendChild(x);
+    pop.appendChild(row);
+    box.appendChild(pop);
+  }
+  function saveFigure() {
+    var keys = Object.keys(EDIT.cells);
+    if (!keys.length) { window.alert("Tegn minst én rute først!"); return; }
+    var name = window.prompt("Navn på figuren?", "Min figur");
+    if (name == null) return;
+    name = ("" + name).trim() || "Min figur";
+    var cells = keys.map(function (k) { var p = k.split(","); return { r: parseInt(p[0], 10), c: parseInt(p[1], 10), color: EDIT.cells[k] }; });
+    addFigure({ id: "f" + Date.now() + "_" + Math.floor(Math.random() * 1000), name: name, cells: cells, rows: EDIT.rows, cols: EDIT.cols });
+    openMyFigures();
+  }
+
   // -- Knapper --------------------------------------------------------------
   $("btnRestart").addEventListener("click", restartJourney);
+  $("btnMyFigs").addEventListener("click", openMyFigures);
   $("btnScores").addEventListener("click", function () {
     // Husk en eventuell blokkerende skjerm (vinner/tap/regel) så «Lukk» går dit.
     var back = resumeOverlay;

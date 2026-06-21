@@ -227,21 +227,28 @@
   ];
 
   // Gjør om ett ikon til liste av fylte celler {r,c,color} + dimensjoner.
-  // Hver celle får sin farge (## = standardfarge, andre tegn via `colors`).
+  // Et ikon kan enten ha `grid` (## = standardfarge, andre tegn via `colors`)
+  // ELLER ferdige `cells` [{r,c,color}] (egendefinerte figurer fra tegneverktøyet).
   // Figuren beskjæres til sitt omriss og får nøyaktig 1 celle margin på hver side.
   function iconToCells(icon) {
-    var colors = icon.colors || {};
     var raw = [];
-    for (var r = 0; r < icon.grid.length; r++) {
-      var lineStr = icon.grid[r];
-      for (var c = 0; c < lineStr.length; c++) {
-        var ch = lineStr[c];
-        if (ch === "." || ch === " ") continue;
-        var col = ch === "#" ? icon.color : (colors[ch] || icon.color);
-        raw.push({ r: r, c: c, color: col });
+    if (icon.cells) {
+      // Egendefinert figur: cellene har allerede farge.
+      raw = icon.cells.map(function (p) { return { r: p.r, c: p.c, color: p.color || icon.color || "#444" }; });
+    } else {
+      var colors = icon.colors || {};
+      for (var r = 0; r < icon.grid.length; r++) {
+        var lineStr = icon.grid[r];
+        for (var c = 0; c < lineStr.length; c++) {
+          var ch = lineStr[c];
+          if (ch === "." || ch === " ") continue;
+          var col = ch === "#" ? icon.color : (colors[ch] || icon.color);
+          raw.push({ r: r, c: c, color: col });
+        }
       }
     }
-    if (raw.length === 0) return { cells: [], rows: 1, cols: 1, name: icon.name, color: icon.color };
+    var fallbackColor = icon.color || (raw[0] && raw[0].color) || "#444";
+    if (raw.length === 0) return { cells: [], rows: 1, cols: 1, name: icon.name, color: fallbackColor };
     var minR = Infinity, maxR = -Infinity, minC = Infinity, maxC = -Infinity;
     raw.forEach(function (p) {
       if (p.r < minR) minR = p.r; if (p.r > maxR) maxR = p.r;
@@ -255,7 +262,7 @@
       cells: cells,
       rows: (maxR - minR + 1) + 2,
       cols: (maxC - minC + 1) + 2,
-      name: icon.name, color: icon.color,
+      name: icon.name, color: fallbackColor,
     };
   }
 
